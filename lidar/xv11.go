@@ -43,7 +43,7 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	var lidar LIDAR
 	lidar.Name = name
 
-	log.Printf("lidar.Open() %s (%s,%s)\n", lidar.Name, port_name, pwm_name)
+	log.Printf("lidar.Open() %s serial=%s pwm=%s\n", lidar.Name, port_name, pwm_name)
 
 	// open the serial port
 	cfg := &serial.Config{Name: port_name, Baud: 115200}
@@ -71,14 +71,9 @@ func (lidar *LIDAR) Close() error {
 	log.Printf("lidar.Close() %s \n", lidar.Name)
 
 	lidar.stop()
+	lidar.pwm.Close()
 
-	err := lidar.pwm.Close()
-	if err != nil {
-		log.Printf("error closing pwm channel\n")
-		return err
-	}
-
-	err = lidar.port.Flush()
+	err := lidar.port.Flush()
 	if err != nil {
 		log.Printf("error flushing serial port\n")
 		return err
