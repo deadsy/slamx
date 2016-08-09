@@ -7,6 +7,11 @@ Driver for Neato XV11 LIDAR Unit
 * Read the serial stream from the LIDAR and repackage it as range data
 * Feed the range data as a stream messages to another Go routine
 
+
+References:
+
+https://xv11hacking.wikispaces.com/LIDAR+Sensor
+
 */
 //-----------------------------------------------------------------------------
 
@@ -41,19 +46,114 @@ const LIDAR_PID_TD = 0.0
 const LIDAR_PID_DT = 0.0
 
 //-----------------------------------------------------------------------------
-// LIDAR Frame
+/*
+LIDAR Frame
+
+A full revolution will yield 90 packets, containing 4 consecutive readings each.
+This amounts to a total of 360 readings (1 per degree)
+The length of a packet is 22 bytes.
+
+Each packet is organized as follows:
+<start> <index> <speed_L> <speed_H> [Data 0] [Data 1] [Data 2] [Data 3] <checksum_L> <checksum_H>
+
+<start> is always 0xFA
+<index >is the index byte in the 90 packets, going from 0xA0 (packet 0, readings 0 to 3) to 0xF9 (packet 89, readings 356 to 359).
+<speed> is a two-byte information, little-endian. It represents the speed, in 64th of RPM (aka value in RPM represented in fixed point, with 6 bits used for the decimal part).
+<data n> are the 4 readings. Each one is 4 bytes long, and organized as follows :
+
+byte 0 : <distance 7:0>`
+byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>`
+byte 2 : <signal strength 7:0>`
+byte 3 : <signal strength 15:8>`
+*/
+
+const LIDAR_FRAME_SIZE = 22
+const LIDAR_SAMPLE_SIZE = 4
 
 const LIDAR_SOF_DELIMITER = 0xfa
 const LIDAR_MIN_INDEX = 0xa0
 const LIDAR_MAX_INDEX = 0xf9
-const SAMPLES_PER_FRAME = 4
+
+const LIDAR_START_OFS = 0
+const LIDAR_INDEX_OFS = 1
+const LIDAR_SPEED_OFS = 2
+const LIDAR_SAMPLE_OFS = 4
+const LIDAR_CHECKSUM_OFS = 20
 
 type LIDAR_frame struct {
-	index    uint8  // 0xa0 - 0xf9 (0-89 offset, 4 samples per frame = 360 measurements)
-	start    uint8  // 0xfa
-	speed    uint16 // little endian, rpm = speed/64
-	samples  [SAMPLES_PER_FRAME]uint32
-	checksum uint16
+	ts   time.Time               // timestamp
+	data [LIDAR_FRAME_SIZE]uint8 // frame data
+}
+
+// return the uint16 at an offset in the frame
+func (frame *LIDAR_frame) get_uint16(ofs int) uint16 {
+	return uint16(frame.data[ofs]) + (uint16(frame.data[ofs+1]) << 8)
+}
+
+// return the checksum of a frame
+func (frame *LIDAR_frame) checksum() uint16 {
+	var cs uint32
+	for i := 0; i < LIDAR_CHECKSUM_OFS; i += 2 {
+		cs = (cs << 1) + uint32(frame.get_uint16(i))
+	}
+	cs = ((cs & 0x7fff) + (cs >> 15)) & 0x7fff
+	return uint16(cs)
+}
+
+// return true for a valid frame
+func (frame *LIDAR_frame) valid() bool {
+	// check SOF
+	if frame.data[LIDAR_START_OFS] != LIDAR_SOF_DELIMITER {
+		return false
+	}
+	// check index
+	index := frame.data[LIDAR_INDEX_OFS]
+	if index < LIDAR_MAX_INDEX || index > LIDAR_MAX_INDEX {
+		return false
+	}
+	// check checksum
+	if frame.checksum() != frame.get_uint16(LIDAR_CHECKSUM_OFS) {
+		return false
+	}
+	return true
+}
+
+// return the speed (rpm) of the LIDAR
+func (frame *LIDAR_frame) speed() float32 {
+	return float32(frame.get_uint16(LIDAR_SPEED_OFS)) / 64.0
+}
+
+// return the base angle of the samples
+func (frame *LIDAR_frame) angle() int {
+	return 4 * (int(frame.data[LIDAR_INDEX_OFS]) - LIDAR_MIN_INDEX)
+}
+
+
+func test_frame() {
+
+	var f0 LIDAR_frame
+	var f1 LIDAR_frame
+	var f2 LIDAR_frame
+
+	f0.data = [LIDAR_FRAME_SIZE]uint8{0xfa,0xc8,0xd9,0x32,0x22,0x1a,0x3f,0x00,0x22,0x1a,0x3f,0x00,0x22,0x1a,0x3f,0x00,0x22,0x1a,0x3f,0x00,0xb2,0x7c,}
+	f1.data = [LIDAR_FRAME_SIZE]uint8{0xfa,0xbf,0xf9,0x49,0x50,0x1a,0x3f,0x00,0x50,0x1a,0x3f,0x00,0x50,0x1a,0x3f,0x00,0x50,0x1a,0x3f,0x00,0x49,0x3b,}
+	f2.data = [LIDAR_FRAME_SIZE]uint8{0xFA,0xF9,0x16,0x4A,0x35,0x1A,0x00,0x00,0x90,0x02,0x17,0x00,0xE5,0x02,0xAC,0x01,0xE4,0x02,0x1A,0x01,0x16,0x22,}
+
+
+	log.Printf("%v", f0)
+	log.Printf("%04x", f0.checksum())
+	log.Printf("%f", f0.speed())
+	log.Printf("%d", f0.angle())
+
+	log.Printf("%v", f1)
+	log.Printf("%04x", f1.checksum())
+	log.Printf("%f", f1.speed())
+	log.Printf("%d", f1.angle())
+
+	log.Printf("%v", f2)
+	log.Printf("%04x", f2.checksum())
+	log.Printf("%f", f2.speed())
+	log.Printf("%d", f2.angle())
 }
 
 //-----------------------------------------------------------------------------
@@ -61,43 +161,25 @@ type LIDAR_frame struct {
 
 type LIDAR_sample struct {
 	no_data   bool   // No return/max range/too low of reflectivity
-	too_close bool   // Object too close, possible poor reading due to proximity < 0.6m
-	dist      uint16 // distance
-	ss        uint16 // ??
+	too_close bool   // object too close
+	dist      uint16 // distance in mm
+	ss        uint16 // signal strength
 }
 
-// extract information from a frame sample
+// get the i-th sample from the frame, i = 0..3
 func (frame *LIDAR_frame) sample(i int) *LIDAR_sample {
-
-	x := frame.samples[i]
-	b0 := (x >> 0) & 0xff
-	b1 := (x >> 8) & 0xff
-	b2 := (x >> 16) & 0xff
-	b3 := (x >> 24) & 0xff
+	ofs := LIDAR_SAMPLE_OFS + (i * LIDAR_SAMPLE_SIZE)
+	b0 := frame.data[ofs]
+	b1 := frame.data[ofs+1]
+	b2 := frame.data[ofs+2]
+	b3 := frame.data[ofs+3]
 
 	var sample LIDAR_sample
 	sample.no_data = (b0>>7)&1 != 0
 	sample.too_close = (b0>>6)&1 != 0
-	sample.dist = uint16(((b0 & 0x3F) << 8) + b1)
-	sample.ss = uint16((b2 << 8) + b3)
+	sample.dist = ((uint16(b0) & 0x3F) << 8) + uint16(b1)
+	sample.ss = (uint16(b2) << 8) + uint16(b3)
 	return &sample
-}
-
-//-----------------------------------------------------------------------------
-
-// endian flip
-func flip16(data uint16) uint16 {
-	return (data >> 8) | (data << 8)
-}
-
-// return the checksum for a LIDAR data frame
-func calc_checksum(data [10]uint16) uint16 {
-	var cs uint32
-	for i := 0; i < 10; i++ {
-		cs = (cs << 1) + uint32(flip16(data[i]))
-	}
-	cs = ((cs & 0x7fff) + (cs >> 15)) & 0x7fff
-	return uint16(cs)
 }
 
 //-----------------------------------------------------------------------------
@@ -115,6 +197,8 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	lidar.Name = name
 
 	log.Printf("lidar.Open() %s serial=%s pwm=%s\n", lidar.Name, port_name, pwm_name)
+
+  test_frame()
 
 	// open the serial port
 	cfg := &serial.Config{Name: port_name, Baud: 115200}
