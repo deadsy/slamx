@@ -108,7 +108,7 @@ func (frame *LIDAR_frame) valid() bool {
 	}
 	// check index
 	index := frame.data[LIDAR_INDEX_OFS]
-	if index < LIDAR_MAX_INDEX || index > LIDAR_MAX_INDEX {
+	if index < LIDAR_MIN_INDEX || index > LIDAR_MAX_INDEX {
 		return false
 	}
 	// check checksum
