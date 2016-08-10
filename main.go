@@ -16,6 +16,11 @@ import (
 
 //-----------------------------------------------------------------------------
 
+const lidar_serial = "/dev/serial0"
+const lidar_pwm = "21"
+
+//-----------------------------------------------------------------------------
+
 func cleanup() {
 	log.Printf("cleanup()")
 }
@@ -24,7 +29,7 @@ func cleanup() {
 
 func main() {
 
-	lidar, err := lidar.Open("lidar0", "/dev/ttyUSB0", "17")
+	lidar, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
 	if err != nil {
 		log.Fatal("unable to open lidar device")
 	}

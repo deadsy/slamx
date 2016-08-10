@@ -1,0 +1,17 @@
+rpi 3 serial ports
+
+By default the uart on the header shows up at /dev/ttyS0.
+It's normally used by the console.
+That can be disabled by editing /boot/cmdline.txt
+The pins should be marked as ALT5 in the gpio mode settings.
+
+gpio readall
+
+| 8  | 1 | ALT5 | TxD     | 15  | 14  |
+| 10 | 1 | ALT5 | RxD     | 16  | 15  |
+
+Don't disable the console with raspi-config - that will remove /dev/ttyS0 as well
+
+Older rpi's used /dev/ttyAMA0
+That used for the BT radio now (hciuart)
+
