@@ -49,12 +49,17 @@ type LIDAR struct {
 //-----------------------------------------------------------------------------
 // PID Parameters for Motor Speed Control
 
-const LIDAR_RPM = 300.0        // target value
-const LIDAR_DEFAULT_PWM = 0.20 // initial setting
+const LIDAR_RPM = 300.0 // setpoint
 
-const LIDAR_PID_KP = 0.0
-const LIDAR_PID_KI = 0.0
-const LIDAR_PID_KD = 0.0
+const PID_KP = 0.0
+const PID_KI = 0.0
+const PID_KD = 0.0
+
+const PID_IMIN = -1.0
+const PID_IMAX = 1.0
+
+const PID_OMIN = 0.0
+const PID_OMAX = 0.5
 
 //-----------------------------------------------------------------------------
 /*
@@ -258,7 +263,9 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	lidar.pwm = pwm
 
 	// Initialise the PID
-	pid := pid.Init(LIDAR_PID_KP, LIDAR_PID_KI, LIDAR_PID_KD)
+	pid := pid.Init(PID_KP, PID_KI, PID_KD, PID_IMIN, PID_IMAX, PID_OMIN, PID_OMAX)
+	pid.Set(LIDAR_RPM)
+
 	lidar.pid = pid
 
 	return &lidar, nil
