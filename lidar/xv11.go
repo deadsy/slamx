@@ -35,12 +35,13 @@ import (
 //-----------------------------------------------------------------------------
 
 type LIDAR struct {
-	Name   string
-	port   *serial.Port
-	pwm    *pwm.PWM
-	frame  LIDAR_frame // frame being read from serial
-	ofs    int         // offset into frame
-	bad_cs int         // frames rx-ed with bad checksum
+	Name        string
+	port        *serial.Port
+	pwm         *pwm.PWM
+	frame       LIDAR_frame // frame being read from serial
+	ofs         int         // offset into frame data
+	good_frames uint        // good frames rx-ed
+	bad_frames  uint        // bad frames rx-ed (invalid checksum)
 }
 
 //-----------------------------------------------------------------------------
@@ -68,12 +69,12 @@ Each packet is organized as follows:
 <start> is always 0xFA
 <index >is the index byte in the 90 packets, going from 0xA0 (packet 0, readings 0 to 3) to 0xF9 (packet 89, readings 356 to 359).
 <speed> is a two-byte information, little-endian. It represents the speed, in 64th of RPM (aka value in RPM represented in fixed point, with 6 bits used for the decimal part).
-<data n> are the 4 readings. Each one is 4 bytes long, and organized as follows :
+<data n> are the 4 readings. Each one is 4 bytes long, and organized as follows:
 
-byte 0 : <distance 7:0>`
-byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>`
-byte 2 : <signal strength 7:0>`
-byte 3 : <signal strength 15:8>`
+byte 0 : <distance 7:0>
+byte 1 : <"invalid data" flag> <"strength warning" flag> <distance 13:8>
+byte 2 : <signal strength 7:0>
+byte 3 : <signal strength 15:8>
 */
 
 const LIDAR_FRAME_SIZE = 22
@@ -85,7 +86,7 @@ const LIDAR_MAX_INDEX = 0xf9
 
 const LIDAR_START_OFS = 0
 const LIDAR_INDEX_OFS = 1
-const LIDAR_SPEED_OFS = 2
+const LIDAR_RPM_OFS = 2
 const LIDAR_SAMPLE_OFS = 4
 const LIDAR_CHECKSUM_OFS = 20
 const LIDAR_END_OFS = 21
@@ -110,9 +111,9 @@ func (frame *LIDAR_frame) checksum() uint16 {
 	return uint16(cs)
 }
 
-// return the speed (rpm) of the LIDAR
-func (frame *LIDAR_frame) speed() float32 {
-	return float32(frame.get_uint16(LIDAR_SPEED_OFS)) / 64.0
+// return the rpm of the LIDAR
+func (frame *LIDAR_frame) rpm() float32 {
+	return float32(frame.get_uint16(LIDAR_RPM_OFS)) / 64.0
 }
 
 // return the base angle of the samples
@@ -120,16 +121,27 @@ func (frame *LIDAR_frame) angle() int {
 	return 4 * (int(frame.data[LIDAR_INDEX_OFS]) - LIDAR_MIN_INDEX)
 }
 
+// process a received lidar frame
+func (lidar *LIDAR) process_frame() {
+	f := &lidar.frame
+	log.Printf("ts %s", f.ts)
+	log.Printf("rpm %f", f.rpm())
+	log.Printf("theta %d", f.angle())
+}
+
 // receive a lidar frame from a buffer
 func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
-	for i := 0; i < len(buf); i++ {
-		c := buf[i]
-		lidar.frame.data[lidar.ofs] = c
+	// We look for a start of frame and a valid index to mark a frame.
+	// We may get some false positives, but they will be weeded out with bad checksums.
+	// Once we sync with the frame cadence we should be good.
+	f := &lidar.frame
+	for _, c := range buf {
+		f.data[lidar.ofs] = c
 		if lidar.ofs == LIDAR_START_OFS {
 			// looking for start of frame
 			if c == LIDAR_SOF_DELIMITER {
 				// ok - set the timestamp
-				lidar.frame.ts = ts
+				f.ts = ts
 				// now read the index
 				lidar.ofs += 1
 			}
@@ -143,13 +155,17 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 				lidar.ofs = LIDAR_START_OFS
 			}
 		} else if lidar.ofs == LIDAR_END_OFS {
-			// we have the whole frame - process it
-			// check checksum
-			if lidar.frame.checksum() == lidar.frame.get_uint16(LIDAR_CHECKSUM_OFS) {
-				// good frame
+			// validate checksum
+			calc_cs := f.checksum()
+			frame_cs := f.get_uint16(LIDAR_CHECKSUM_OFS)
+			if calc_cs == frame_cs {
+				// good frame - process it
+				lidar.good_frames += 1
+				lidar.process_frame()
 			} else {
 				// bad frame
-				lidar.bad_cs += 1
+				log.Printf("bad checksum calc %04x frame %04x", calc_cs, frame_cs)
+				lidar.bad_frames += 1
 			}
 			// reset for the next frame
 			lidar.ofs = LIDAR_START_OFS
@@ -160,41 +176,23 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 	}
 }
 
-func test_frame() {
+func (lidar *LIDAR) test_frame() {
 
-	var f0 LIDAR_frame
-	var f1 LIDAR_frame
-	var f2 LIDAR_frame
-	var f3 LIDAR_frame
+	b0 := []byte{0xfa, 0xc8, 0xd9, 0x32, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0xb2, 0x7c}
+	b1 := []byte{0xfa, 0xbf, 0xf9, 0x49, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x49, 0x3b}
+	b2 := []byte{0xFA, 0xF9, 0x16, 0x4A, 0x35, 0x1A, 0x00, 0x00, 0x90, 0x02, 0x17, 0x00, 0xE5, 0x02, 0xAC, 0x01, 0xE4, 0x02, 0x1A, 0x01, 0x16, 0x22}
+	b3 := []byte{0xfa, 0xde, 0x5e, 0x4a, 0xd8, 0x07, 0x1f, 0x00, 0xe5, 0x07, 0x1b, 0x00, 0xf0, 0x0b, 0x09, 0x00, 0xfb, 0x0b, 0x08, 0x00, 0xcd, 0x3f}
 
-	f0.data = [LIDAR_FRAME_SIZE]uint8{0xfa, 0xc8, 0xd9, 0x32, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0xb2, 0x7c}
-	f1.data = [LIDAR_FRAME_SIZE]uint8{0xfa, 0xbf, 0xf9, 0x49, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x49, 0x3b}
-	f2.data = [LIDAR_FRAME_SIZE]uint8{0xFA, 0xF9, 0x16, 0x4A, 0x35, 0x1A, 0x00, 0x00, 0x90, 0x02, 0x17, 0x00, 0xE5, 0x02, 0xAC, 0x01, 0xE4, 0x02, 0x1A, 0x01, 0x16, 0x22}
-	f3.data = [LIDAR_FRAME_SIZE]uint8{0xfa, 0xde, 0x5e, 0x4a, 0xd8, 0x07, 0x1f, 0x00, 0xe5, 0x07, 0x1b, 0x00, 0xf0, 0x0b, 0x09, 0x00, 0xfb, 0x0b, 0x08, 0x00, 0xcd, 0x3f}
+	junk := []byte{0xde, 0xad, 0xbe, 0xef}
 
-	log.Printf("%v", f0)
-	log.Printf("%04x", f0.checksum())
-	log.Printf("%04x", f0.get_uint16(LIDAR_CHECKSUM_OFS))
-	log.Printf("%f", f0.speed())
-	log.Printf("%d", f0.angle())
-
-	log.Printf("%v", f1)
-	log.Printf("%04x", f1.checksum())
-	log.Printf("%04x", f1.get_uint16(LIDAR_CHECKSUM_OFS))
-	log.Printf("%f", f1.speed())
-	log.Printf("%d", f1.angle())
-
-	log.Printf("%v", f2)
-	log.Printf("%04x", f2.checksum())
-	log.Printf("%04x", f2.get_uint16(LIDAR_CHECKSUM_OFS))
-	log.Printf("%f", f2.speed())
-	log.Printf("%d", f2.angle())
-
-	log.Printf("%v", f3)
-	log.Printf("%04x", f3.checksum())
-	log.Printf("%04x", f3.get_uint16(LIDAR_CHECKSUM_OFS))
-	log.Printf("%f", f3.speed())
-	log.Printf("%d", f3.angle())
+	lidar.rx_frame(b0, time.Now())
+	lidar.rx_frame(junk, time.Now())
+	lidar.rx_frame(b1, time.Now())
+	lidar.rx_frame(junk, time.Now())
+	lidar.rx_frame(b2, time.Now())
+	lidar.rx_frame(junk, time.Now())
+	lidar.rx_frame(b3, time.Now())
+	lidar.rx_frame(junk, time.Now())
 }
 
 //-----------------------------------------------------------------------------
@@ -239,7 +237,7 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 
 	log.Printf("lidar.Open() %s serial=%s pwm=%s\n", lidar.Name, port_name, pwm_name)
 
-	test_frame()
+	lidar.test_frame()
 
 	// open the serial port
 	cfg := &serial.Config{Name: port_name, Baud: 115200}
