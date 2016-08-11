@@ -28,6 +28,7 @@ import (
 	"log"
 	"time"
 
+	"github.com/deadsy/slamx/pid"
 	"github.com/deadsy/slamx/pwm"
 	"github.com/tarm/serial"
 )
@@ -38,6 +39,7 @@ type LIDAR struct {
 	Name        string
 	port        *serial.Port
 	pwm         *pwm.PWM
+	pid         *pid.PID
 	frame       LIDAR_frame // frame being read from serial
 	ofs         int         // offset into frame data
 	good_frames uint        // good frames rx-ed
@@ -51,9 +53,8 @@ const LIDAR_RPM = 300.0        // target value
 const LIDAR_DEFAULT_PWM = 0.20 // initial setting
 
 const LIDAR_PID_KP = 0.0
-const LIDAR_PID_TI = 0.0
-const LIDAR_PID_TD = 0.0
-const LIDAR_PID_DT = 0.0
+const LIDAR_PID_KI = 0.0
+const LIDAR_PID_KD = 0.0
 
 //-----------------------------------------------------------------------------
 /*
@@ -255,6 +256,10 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 		return nil, err
 	}
 	lidar.pwm = pwm
+
+	// Initialise the PID
+	pid := pid.Init(LIDAR_PID_KP, LIDAR_PID_KI, LIDAR_PID_KD)
+	lidar.pid = pid
 
 	return &lidar, nil
 }
