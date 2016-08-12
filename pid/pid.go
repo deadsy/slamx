@@ -1,9 +1,22 @@
+//-----------------------------------------------------------------------------
+/*
+
+Generic PID Control
+
+References:
+https://en.wikipedia.org/wiki/PID_controller
+
+*/
+//-----------------------------------------------------------------------------
+
 package pid
 
 import (
 	"errors"
 	"log"
 )
+
+//-----------------------------------------------------------------------------
 
 type PID struct {
 	kp      float32 // proportional constant
@@ -18,6 +31,8 @@ type PID struct {
 	i_term  float32 // integral sum
 	d_flag  bool    // avoid spiking d_term on the first update
 }
+
+//-----------------------------------------------------------------------------
 
 // Update the PID, return the control value
 func (pid *PID) Update(pv float32) float32 {
@@ -62,11 +77,16 @@ func (pid *PID) Update(pv float32) float32 {
 	return out
 }
 
+//-----------------------------------------------------------------------------
+
 // Set the process setpoint
 func (pid *PID) Set(sp float32) {
 	pid.sp = sp
 }
 
+//-----------------------------------------------------------------------------
+
+// Initialise the PID state
 func Init(dt, kp, ki, kd, i_min, i_max, o_min, o_max float32) (*PID, error) {
 
 	var pid PID
@@ -92,3 +112,5 @@ func Init(dt, kp, ki, kd, i_min, i_max, o_min, o_max float32) (*PID, error) {
 
 	return &pid, nil
 }
+
+//-----------------------------------------------------------------------------
