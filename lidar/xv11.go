@@ -7,6 +7,7 @@ Driver for Neato XV11 LIDAR Unit
 * Read the serial stream from the LIDAR and repackage it as range data
 * Feed the range data as messages to another Go routine
 
+Baud Rate:
 22 bytes/frame
 90 frames/rev
 300 revs/min
@@ -14,8 +15,34 @@ Driver for Neato XV11 LIDAR Unit
 9900 * 11 bits/byte = 108900 bits/sec
 So: The serial port runs at 115200 baud to keep up.
 
-References:
+Serial Port:
+The LIDAR is powered with +5V but the Rx/Tx lines ares 3.3V.
+That's good because we can plug them directly into the RPi.
 
+Motor Speed:
+300 rpm is a good target speed giving a 5 Hz 360 degree scan.
+Experimentally 3.11V @ 100% gives about 300 rpm.
+Other voltages/duty cycles can be guessed at from that.
+
+Compatability:
+This driver has been tested against a v2.6 unit.
+It probably works with v2.4 units.
+It won't work with v2.1 units.
+
+XV11 LIDAR Boot Output:
+"""
+Piccolo Laser Distance Scanner
+Copyright (c) 2009-2011 Neato Robotics, Inc.
+All Rights Reserved
+
+Loader  V2.5.15295
+CPU     F2802x/c001
+Serial  KSH34313AA-0140063
+LastCal [5371726C]
+Runtime V2.6.15295
+"""
+
+References:
 https://xv11hacking.wikispaces.com/LIDAR+Sensor
 
 */
@@ -50,16 +77,12 @@ type LIDAR struct {
 // PID Parameters for Motor Speed Control
 
 const LIDAR_RPM = 300.0 // setpoint
-
-const PID_PERIOD = 0.1 // 100ms
-
+const PID_PERIOD = 0.1  // 100ms
 const PID_KP = 0.0
 const PID_KI = 0.0
 const PID_KD = 0.0
-
 const PID_IMIN = -1.0
 const PID_IMAX = 1.0
-
 const PID_OMIN = 0.0
 const PID_OMAX = 0.5
 
@@ -132,9 +155,12 @@ func (frame *LIDAR_frame) angle() int {
 // process a received lidar frame
 func (lidar *LIDAR) process_frame() {
 	f := &lidar.frame
-	log.Printf("ts %s", f.ts)
-	log.Printf("rpm %f", f.rpm())
-	log.Printf("theta %d", f.angle())
+	log.Printf("rpm %f theta %d", f.rpm(), f.angle())
+	s0 := f.sample(0)
+	s1 := f.sample(1)
+	s2 := f.sample(2)
+	s3 := f.sample(3)
+	log.Printf("%d %d %d %d", s0.dist, s1.dist, s2.dist, s3.dist)
 }
 
 // receive a lidar frame from a buffer
@@ -172,7 +198,6 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 				lidar.process_frame()
 			} else {
 				// bad frame
-				log.Printf("bad checksum calc %04x frame %04x", calc_cs, frame_cs)
 				lidar.bad_frames += 1
 			}
 			// reset for the next frame
@@ -182,25 +207,6 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 			lidar.ofs += 1
 		}
 	}
-}
-
-func (lidar *LIDAR) test_frame() {
-
-	b0 := []byte{0xfa, 0xc8, 0xd9, 0x32, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0x22, 0x1a, 0x3f, 0x00, 0xb2, 0x7c}
-	b1 := []byte{0xfa, 0xbf, 0xf9, 0x49, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x50, 0x1a, 0x3f, 0x00, 0x49, 0x3b}
-	b2 := []byte{0xFA, 0xF9, 0x16, 0x4A, 0x35, 0x1A, 0x00, 0x00, 0x90, 0x02, 0x17, 0x00, 0xE5, 0x02, 0xAC, 0x01, 0xE4, 0x02, 0x1A, 0x01, 0x16, 0x22}
-	b3 := []byte{0xfa, 0xde, 0x5e, 0x4a, 0xd8, 0x07, 0x1f, 0x00, 0xe5, 0x07, 0x1b, 0x00, 0xf0, 0x0b, 0x09, 0x00, 0xfb, 0x0b, 0x08, 0x00, 0xcd, 0x3f}
-
-	junk := []byte{0xde, 0xad, 0xbe, 0xef}
-
-	lidar.rx_frame(b0, time.Now())
-	lidar.rx_frame(junk, time.Now())
-	lidar.rx_frame(b1, time.Now())
-	lidar.rx_frame(junk, time.Now())
-	lidar.rx_frame(b2, time.Now())
-	lidar.rx_frame(junk, time.Now())
-	lidar.rx_frame(b3, time.Now())
-	lidar.rx_frame(junk, time.Now())
 }
 
 //-----------------------------------------------------------------------------
@@ -224,17 +230,9 @@ func (frame *LIDAR_frame) sample(i int) *LIDAR_sample {
 	var sample LIDAR_sample
 	sample.no_data = (b0>>7)&1 != 0
 	sample.too_close = (b0>>6)&1 != 0
-	sample.dist = ((uint16(b0) & 0x3F) << 8) + uint16(b1)
+	sample.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
 	sample.ss = (uint16(b2) << 8) + uint16(b3)
 	return &sample
-}
-
-//-----------------------------------------------------------------------------
-
-func (lidar *LIDAR) stop() {
-	log.Printf("lidar.stop() %s", lidar.Name)
-	// turn the motor off
-	lidar.pwm.Set(0.0)
 }
 
 //-----------------------------------------------------------------------------
@@ -245,10 +243,8 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 
 	log.Printf("lidar.Open() %s serial=%s pwm=%s", lidar.Name, port_name, pwm_name)
 
-	lidar.test_frame()
-
 	// open the serial port
-	cfg := &serial.Config{Name: port_name, Baud: 115200}
+	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 20 * time.Millisecond}
 	port, err := serial.OpenPort(cfg)
 	if err != nil {
 		log.Printf("unable to open serial port %s", port_name)
@@ -279,9 +275,10 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 //-----------------------------------------------------------------------------
 
 func (lidar *LIDAR) Close() error {
-	log.Printf("lidar.Close() %s", lidar.Name)
+	log.Printf("lidar.Close() %s ", lidar.Name)
+	log.Printf("good/bad %d/%d", lidar.good_frames, lidar.bad_frames)
 
-	lidar.stop()
+	lidar.pwm.Set(0.0)
 	lidar.pwm.Close()
 
 	err := lidar.port.Flush()
@@ -303,10 +300,15 @@ func (lidar *LIDAR) Close() error {
 
 func (lidar *LIDAR) Process() {
 	log.Printf("lidar.Process() %s", lidar.Name)
-
 	for true {
-		time.Sleep(100 * time.Millisecond)
-		log.Printf("lidar.Process() %s timeout", lidar.Name)
+		buf := make([]byte, 128)
+		n, err := lidar.port.Read(buf)
+		if err != nil {
+			log.Printf("error on serial read")
+		}
+		if n != 0 {
+			lidar.rx_frame(buf[:n], time.Now())
+		}
 	}
 }
 
