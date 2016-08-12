@@ -68,6 +68,7 @@ type LIDAR struct {
 	pwm         *pwm.PWM
 	pid         *pid.PID
 	rpm         float32     // measured rpm
+	pid_on      bool        // is the PID turned on?
 	frame       LIDAR_frame // frame being read from serial
 	ofs         int         // offset into frame data
 	good_frames uint        // good frames rx-ed
@@ -77,12 +78,14 @@ type LIDAR struct {
 //-----------------------------------------------------------------------------
 
 const LIDAR_READ_PERIOD = 50   // read lidar frames every N ms
-const LIDAR_MOTOR_PERIOD = 100 // update the motor pwm every N ms
+const LIDAR_MOTOR_PERIOD = 200 // update the motor pwm every N ms
 
 //-----------------------------------------------------------------------------
 // PID Parameters for Motor Speed Control
 
-const LIDAR_RPM = 300.0 // setpoint
+const LIDAR_RPM = 300.0          // target rpm
+const LIDAR_RPM_SHUTDOWN = 330.0 // shutdown limit
+
 const PID_PERIOD = float32(LIDAR_MOTOR_PERIOD) / 1000.0
 const PID_KP = 0.0
 const PID_KI = 0.0
@@ -277,6 +280,7 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	}
 	pid.Set(LIDAR_RPM)
 	lidar.pid = pid
+	lidar.pid_on = true
 
 	return &lidar, nil
 }
@@ -326,7 +330,15 @@ func (lidar *LIDAR) read_serial() {
 
 // Update the PWM value using the PID
 func (lidar *LIDAR) motor_control() {
-	lidar.pwm.Set(lidar.pid.Update(lidar.rpm))
+	// prevent motor burnout during pid tuning
+	if lidar.rpm > LIDAR_RPM_SHUTDOWN {
+		log.Printf("max motor rpm exceeded %f > %f", lidar.rpm, LIDAR_RPM_SHUTDOWN)
+		lidar.pwm.Set(0.0)
+		lidar.pid_on = false
+	}
+	if lidar.pid_on {
+		lidar.pwm.Set(lidar.pid.Update(lidar.rpm))
+	}
 }
 
 func (lidar *LIDAR) Process() {

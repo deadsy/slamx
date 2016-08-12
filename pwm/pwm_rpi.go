@@ -16,6 +16,7 @@ package pwm
 import (
 	"fmt"
 	"log"
+	"math"
 	"os"
 )
 
@@ -28,16 +29,25 @@ type PWM struct {
 
 //-----------------------------------------------------------------------------
 
-// Clamp a value from 0.0 to 1.0
-func clamp(x float32) float32 {
-	if x > 1.0 {
+const PWM_RESOLUTION = 1000.0 // NUM_SAMPLES per pi-blaster code
+
+// normalise a pwm value
+func normalise(val float32) float32 {
+	// clamp the value between 0 and 1
+	if val > 1.0 {
 		return 1.0
 	}
-	if x < 0.0 {
+	if val < 0.0 {
 		return 0.0
 	}
-	return x
+	// I don't want to incur the expense of IO if the pwm value
+	// is dancing around at a level below the provided resolution,
+	// so remove any superfluous resolution.
+	val = float32(math.Floor((float64(val)*PWM_RESOLUTION)+0.5) / PWM_RESOLUTION)
+	return val
 }
+
+//-----------------------------------------------------------------------------
 
 // Write to the PWM device
 func (pwm *PWM) write(msg string) error {
@@ -76,12 +86,13 @@ func (pwm *PWM) Close() {
 
 // Set the PWM value
 func (pwm *PWM) Set(val float32) {
-	log.Printf("pwm.Set() %s = %f\n", pwm.Name, pwm.Val)
+	log.Printf("pwm.Set() %s = %f\n", pwm.Name, val)
+	val = normalise(val)
 	if val == pwm.Val {
 		// no change
 		return
 	}
-	pwm.Val = clamp(val)
+	pwm.Val = val
 	pwm.write(fmt.Sprintf("%s=%.3f", pwm.Pin, pwm.Val))
 }
 
