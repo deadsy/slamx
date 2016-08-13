@@ -53,6 +53,7 @@ package lidar
 import (
 	"fmt"
 	"log"
+	"sync"
 	"time"
 
 	"github.com/deadsy/slamx/pid"
@@ -67,6 +68,7 @@ type LIDAR struct {
 	port        *serial.Port
 	pwm         *pwm.PWM
 	pid         *pid.PID
+	rpm_lock    sync.Mutex  // lock for access to rpm
 	rpm         float32     // measured rpm
 	pid_on      bool        // is the PID turned on?
 	frame       LIDAR_frame // frame being read from serial
@@ -76,16 +78,13 @@ type LIDAR struct {
 }
 
 //-----------------------------------------------------------------------------
-
-const LIDAR_READ_PERIOD = 50   // read lidar frames every N ms
-const LIDAR_MOTOR_PERIOD = 200 // update the motor pwm every N ms
-
-//-----------------------------------------------------------------------------
-// PID Parameters for Motor Speed Control
+// Motor Speed Control
 
 const LIDAR_RPM = 300.0          // target rpm
 const LIDAR_RPM_SHUTDOWN = 330.0 // shutdown limit
+const LIDAR_MOTOR_PERIOD = 200   // update the motor pwm every N ms
 
+// PID parameters
 const PID_PERIOD = float32(LIDAR_MOTOR_PERIOD) / 1000.0
 const PID_KP = 0.0
 const PID_KI = 0.0
@@ -94,6 +93,41 @@ const PID_IMIN = -1.0
 const PID_IMAX = 1.0
 const PID_OMIN = 0.0
 const PID_OMAX = 0.5
+
+// the measured motor rpm is determined by read_serial() and used by the motor_control()
+// these are different go-routines, hence we need locking
+
+// set the motor rpm process value
+func (lidar *LIDAR) set_rpm_pv(rpm float32) {
+	lidar.rpm_lock.Lock()
+	lidar.rpm = rpm
+	lidar.rpm_lock.Unlock()
+}
+
+// get the motor rpm process value
+func (lidar *LIDAR) get_rpm_pv() float32 {
+	lidar.rpm_lock.Lock()
+	rpm := lidar.rpm
+	lidar.rpm_lock.Unlock()
+	return rpm
+}
+
+// Update the PWM value using the PID
+func (lidar *LIDAR) motor_control() {
+	for {
+		rpm := lidar.get_rpm_pv()
+		// prevent motor burnout during pid tuning
+		if rpm > LIDAR_RPM_SHUTDOWN {
+			log.Printf("max motor rpm exceeded %f > %f", rpm, LIDAR_RPM_SHUTDOWN)
+			lidar.pwm.Set(0.0)
+			lidar.pid_on = false
+		}
+		if lidar.pid_on {
+			lidar.pwm.Set(lidar.pid.Update(rpm))
+		}
+		time.Sleep(LIDAR_MOTOR_PERIOD * time.Millisecond)
+	}
+}
 
 //-----------------------------------------------------------------------------
 /*
@@ -165,14 +199,14 @@ func (frame *LIDAR_frame) angle() int {
 func (lidar *LIDAR) process_frame() {
 	f := &lidar.frame
 	log.Printf("rpm %f theta %d", f.rpm(), f.angle())
-	// store the rpm for the PID process value
-	lidar.rpm = f.rpm()
+	// set rpm for the PID process value
+	lidar.set_rpm_pv(f.rpm())
 
-	s0 := f.sample(0)
-	s1 := f.sample(1)
-	s2 := f.sample(2)
-	s3 := f.sample(3)
-	log.Printf("%d %d %d %d", s0.dist, s1.dist, s2.dist, s3.dist)
+	// 	s0 := f.sample(0)
+	// 	s1 := f.sample(1)
+	// 	s2 := f.sample(2)
+	// 	s3 := f.sample(3)
+	//log.Printf("%d %d %d %d", s0.dist, s1.dist, s2.dist, s3.dist)
 }
 
 // receive a lidar frame from a buffer
@@ -221,6 +255,23 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 	}
 }
 
+// Read the serial port and process the frames
+func (lidar *LIDAR) read_serial() {
+	for {
+		buf := make([]byte, 1024)
+		n, err := lidar.port.Read(buf)
+		if err != nil {
+			log.Printf("error on serial read %s", err)
+		} else {
+			lidar.rx_frame(buf[:n], time.Now())
+		}
+		// Wait a while - there's a tradeoff here between data latency and cpu usage.
+		// A smaller wait time gives lower latency and more cpu consumption.
+		// 300 rpm = 200 ms/rev, so 50 ms is 1/4 revolution
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
 //-----------------------------------------------------------------------------
 // LIDAR Sample
 
@@ -256,7 +307,7 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	log.Printf("lidar.Open() %s serial=%s pwm=%s", lidar.Name, port_name, pwm_name)
 
 	// open the serial port
-	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 20 * time.Millisecond}
+	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 1 * time.Millisecond}
 	port, err := serial.OpenPort(cfg)
 	if err != nil {
 		log.Printf("unable to open serial port %s", port_name)
@@ -311,50 +362,10 @@ func (lidar *LIDAR) Close() error {
 
 //-----------------------------------------------------------------------------
 
-// Read the serial port and process the frames
-func (lidar *LIDAR) read_serial() {
-	// Note: We'd like to get all the bytes in one read. How many bytes is that?
-	// n = period * (rpm / 60) * 90 frames/rev * 22 bytes/frame
-	// n = 0.05 * (300/60) * 90 * 22
-	// n = 495
-	// TODO: multiple reads to flush startup junk
-	buf := make([]byte, 512)
-	n, err := lidar.port.Read(buf)
-	if err != nil {
-		log.Printf("error on serial read")
-	}
-	if n != 0 {
-		lidar.rx_frame(buf[:n], time.Now())
-	}
-}
-
-// Update the PWM value using the PID
-func (lidar *LIDAR) motor_control() {
-	// prevent motor burnout during pid tuning
-	if lidar.rpm > LIDAR_RPM_SHUTDOWN {
-		log.Printf("max motor rpm exceeded %f > %f", lidar.rpm, LIDAR_RPM_SHUTDOWN)
-		lidar.pwm.Set(0.0)
-		lidar.pid_on = false
-	}
-	if lidar.pid_on {
-		lidar.pwm.Set(lidar.pid.Update(lidar.rpm))
-	}
-}
-
 func (lidar *LIDAR) Process() {
 	log.Printf("lidar.Process() %s", lidar.Name)
-
-	read_tick := time.NewTicker(LIDAR_READ_PERIOD * time.Millisecond).C
-	motor_tick := time.NewTicker(LIDAR_MOTOR_PERIOD * time.Millisecond).C
-
-	for {
-		select {
-		case <-read_tick:
-			lidar.read_serial()
-		case <-motor_tick:
-			lidar.motor_control()
-		}
-	}
+	go lidar.motor_control()
+	go lidar.read_serial()
 }
 
 //-----------------------------------------------------------------------------

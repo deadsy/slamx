@@ -16,11 +16,6 @@ import (
 
 //-----------------------------------------------------------------------------
 
-const lidar_serial = "/dev/serial0"
-const lidar_pwm = "21"
-
-//-----------------------------------------------------------------------------
-
 func cleanup() {
 	log.Printf("cleanup()")
 }
@@ -35,7 +30,7 @@ func main() {
 	}
 
 	// start the LIDAR process
-	go lidar.Process()
+	lidar.Process()
 
 	running := true
 
