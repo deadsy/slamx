@@ -5,10 +5,13 @@ import (
 	"github.com/veandco/go-sdl2/sdl"
 )
 
+const WINDOW_W = 640
+const WINDOW_H = 400
+
 func main() {
 	sdl.Init(sdl.INIT_EVERYTHING)
 
-	window, err := sdl.CreateWindow("test", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, 800, 600, sdl.WINDOW_SHOWN)
+	window, err := sdl.CreateWindow("test", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WINDOW_W, WINDOW_H, sdl.WINDOW_SHOWN)
 	if err != nil {
 		panic(err)
 	}
