@@ -2,10 +2,10 @@
 OUT = slamx
 URL = 192.168.1.7
 
-all: dev
+all: pc
 
-dev:
-	env GOOS=linux GOARCH=amd64 go build -v -tags dev
+pc:
+	env GOOS=linux GOARCH=amd64 go build -v -tags pc
 
 rpi:
 	env GOOS=linux GOARCH=arm go build -v -tags rpi
@@ -16,4 +16,4 @@ copy:
 clean:
 	go clean
 
-.PHONY: all dev rpi clean
+.PHONY: all pc rpi clean
