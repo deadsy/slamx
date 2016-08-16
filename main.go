@@ -20,7 +20,7 @@ import (
 
 func main() {
 
-	lidar, err := lidar.Open(lidar_serial, lidar_pwm)
+	lidar0, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
 	if err != nil {
 		log.Fatal("unable to open lidar device")
 	}
@@ -30,7 +30,7 @@ func main() {
 
 	// start the LIDAR process
 	wg.Add(1)
-	go lidar.Process(quit, wg)
+	go lidar0.Process(quit, wg)
 
 	// start the viewing window
 	view.Process()
@@ -55,7 +55,7 @@ func main() {
 	close(quit)
 	wg.Wait()
 
-	lidar.Close()
+	lidar0.Close()
 	os.Exit(0)
 }
 

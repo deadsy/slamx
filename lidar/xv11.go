@@ -51,6 +51,7 @@ https://xv11hacking.wikispaces.com/LIDAR+Sensor
 package lidar
 
 import (
+	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -63,6 +64,7 @@ import (
 //-----------------------------------------------------------------------------
 
 type LIDAR struct {
+	Name        string // user name for this device
 	port        *serial.Port
 	pwm         *pwm.PWM
 	pid         *pid.PID
@@ -112,21 +114,21 @@ func (lidar *LIDAR) get_rpm_pv() float32 {
 
 // Update the PWM value using the PID
 func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("lidar.motor_control() enter")
+	log.Printf("%s.motor_control() enter", lidar.Name)
 	defer wg.Done()
 	// perform pid/pwm updates at the LIDAR_MOTOR_PERIOD
 	tick := time.NewTicker(LIDAR_MOTOR_PERIOD * time.Millisecond)
 	for {
 		select {
 		case <-quit:
-			log.Printf("lidar.motor_control() exit")
+			log.Printf("%s.motor_control() exit", lidar.Name)
 			tick.Stop()
 			return
 		case <-tick.C:
 			rpm := lidar.get_rpm_pv()
 			// prevent motor burnout during pid tuning
 			if rpm > LIDAR_RPM_SHUTDOWN {
-				log.Printf("max motor rpm exceeded %f > %f", rpm, LIDAR_RPM_SHUTDOWN)
+				log.Printf("%s: max motor rpm exceeded %f > %f", lidar.Name, rpm, LIDAR_RPM_SHUTDOWN)
 				lidar.pwm.Set(0.0)
 				lidar.pid_on = false
 			}
@@ -206,7 +208,7 @@ func (frame *LIDAR_frame) angle() int {
 // process a received lidar frame
 func (lidar *LIDAR) process_frame() {
 	f := &lidar.frame
-	log.Printf("rpm %f theta %d", f.rpm(), f.angle())
+	log.Printf("%s: rpm %f theta %d", lidar.Name, f.rpm(), f.angle())
 	// set rpm for the PID process value
 	lidar.set_rpm_pv(f.rpm())
 
@@ -265,12 +267,12 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 
 // Read the serial port and process the frames
 func (lidar *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("lidar.read_serial() enter")
+	log.Printf("%s.read_serial() enter", lidar.Name)
 	defer wg.Done()
 	for {
 		select {
 		case <-quit:
-			log.Printf("lidar.read_serial() exit")
+			log.Printf("%s.read_serial() exit", lidar.Name)
 			return
 		default:
 			buf := make([]byte, 1024)
@@ -314,24 +316,25 @@ func (frame *LIDAR_frame) sample(i int) *LIDAR_sample {
 
 //-----------------------------------------------------------------------------
 
-func Open(port_name, pwm_name string) (*LIDAR, error) {
+func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	var lidar LIDAR
+	lidar.Name = name
 
-	log.Printf("lidar.Open() serial=%s pwm=%s", port_name, pwm_name)
+	log.Printf("%s.Open() serial=%s pwm=%s", lidar.Name, port_name, pwm_name)
 
 	// open the serial port
 	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 500 * time.Millisecond}
 	port, err := serial.OpenPort(cfg)
 	if err != nil {
-		log.Printf("unable to open serial port %s", port_name)
+		log.Printf("%s: unable to open serial port %s", lidar.Name, port_name)
 		return nil, err
 	}
 	lidar.port = port
 
 	// open the pwm channel
-	pwm, err := pwm.Open(pwm_name, 0.0)
+	pwm, err := pwm.Open(fmt.Sprintf("%s_pwm", lidar.Name), pwm_name, 0.0)
 	if err != nil {
-		log.Printf("unable to open pwm channel")
+		log.Printf("%s: unable to open pwm channel", lidar.Name)
 		return nil, err
 	}
 	lidar.pwm = pwm
@@ -339,7 +342,7 @@ func Open(port_name, pwm_name string) (*LIDAR, error) {
 	// Initialise the PID
 	pid, err := pid.Init(PID_PERIOD, PID_KP, PID_KI, PID_KD, PID_IMIN, PID_IMAX, PID_OMIN, PID_OMAX)
 	if err != nil {
-		log.Printf("unable to setup pid")
+		log.Printf("%s: unable to setup pid", lidar.Name)
 		return nil, err
 	}
 	pid.Set(LIDAR_RPM)
@@ -352,21 +355,21 @@ func Open(port_name, pwm_name string) (*LIDAR, error) {
 //-----------------------------------------------------------------------------
 
 func (lidar *LIDAR) Close() error {
-	log.Printf("lidar.Close()")
-	log.Printf("good/bad %d/%d", lidar.good_frames, lidar.bad_frames)
+	log.Printf("%s.Close()", lidar.Name)
+	log.Printf("%s: good/bad %d/%d", lidar.Name, lidar.good_frames, lidar.bad_frames)
 
 	lidar.pwm.Set(0.0)
 	lidar.pwm.Close()
 
 	err := lidar.port.Flush()
 	if err != nil {
-		log.Printf("error flushing serial port")
+		log.Printf("%s: error flushing serial port", lidar.Name)
 		return err
 	}
 
 	err = lidar.port.Close()
 	if err != nil {
-		log.Printf("error closing serial port")
+		log.Printf("%s: error closing serial port", lidar.Name)
 		return err
 	}
 
@@ -376,7 +379,7 @@ func (lidar *LIDAR) Close() error {
 //-----------------------------------------------------------------------------
 
 func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("lidar.Process() enter")
+	log.Printf("%s.Process() enter", lidar.Name)
 	defer wg.Done()
 
 	lidar_wg := &sync.WaitGroup{}
@@ -393,7 +396,7 @@ func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
 		select {
 		case <-quit:
 			lidar_wg.Wait()
-			log.Printf("lidar.Process() exit")
+			log.Printf("%s.Process() exit", lidar.Name)
 			return
 		}
 	}
