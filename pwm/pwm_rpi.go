@@ -21,10 +21,9 @@ import (
 )
 
 type PWM struct {
-	Name string
-	Pin  string
-	Val  float32
-	dev  *os.File
+	Pin string
+	Val float32
+	dev *os.File
 }
 
 //-----------------------------------------------------------------------------
@@ -62,10 +61,9 @@ func (pwm *PWM) write(msg string) error {
 //-----------------------------------------------------------------------------
 
 // Open the PWM channel
-func Open(name, pin string, val float32) (*PWM, error) {
-	log.Printf("pwm.Open() %s pin=%s\n", name, pin)
+func Open(pin string, val float32) (*PWM, error) {
+	log.Printf("pwm.Open() pin=%s\n", pin)
 	var pwm PWM
-	pwm.Name = name
 	pwm.Pin = pin
 	f, err := os.OpenFile("/dev/pi-blaster", os.O_WRONLY, 0660)
 	if err != nil {
@@ -79,14 +77,14 @@ func Open(name, pin string, val float32) (*PWM, error) {
 
 // Close the PWM channel
 func (pwm *PWM) Close() {
-	log.Printf("pwm.Close() %s\n", pwm.Name)
+	log.Printf("pwm.Close()\n")
 	pwm.write(fmt.Sprintf("release %s", pwm.Pin))
 	pwm.dev.Close()
 }
 
 // Set the PWM value
 func (pwm *PWM) Set(val float32) {
-	log.Printf("pwm.Set() %s = %f\n", pwm.Name, val)
+	//log.Printf("pwm.Set() %s = %f\n", pwm.Name, val)
 	val = normalise(val)
 	if val == pwm.Val {
 		// no change

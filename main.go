@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -17,21 +18,19 @@ import (
 
 //-----------------------------------------------------------------------------
 
-func cleanup() {
-	log.Printf("cleanup()")
-}
-
-//-----------------------------------------------------------------------------
-
 func main() {
 
-	lidar, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
+	lidar, err := lidar.Open(lidar_serial, lidar_pwm)
 	if err != nil {
 		log.Fatal("unable to open lidar device")
 	}
 
+	quit := make(chan bool)
+	wg := &sync.WaitGroup{}
+
 	// start the LIDAR process
-	lidar.Process()
+	wg.Add(1)
+	go lidar.Process(quit, wg)
 
 	// start the viewing window
 	view.Process()
@@ -44,7 +43,6 @@ func main() {
 	go func() {
 		for sig := range c {
 			log.Printf("captured %v, exiting", sig)
-			cleanup()
 			running = false
 		}
 	}()
@@ -53,6 +51,9 @@ func main() {
 		time.Sleep(1 * time.Second)
 		log.Printf("main() timeout")
 	}
+
+	close(quit)
+	wg.Wait()
 
 	lidar.Close()
 	os.Exit(0)

@@ -51,7 +51,6 @@ https://xv11hacking.wikispaces.com/LIDAR+Sensor
 package lidar
 
 import (
-	"fmt"
 	"log"
 	"sync"
 	"time"
@@ -64,7 +63,6 @@ import (
 //-----------------------------------------------------------------------------
 
 type LIDAR struct {
-	Name        string
 	port        *serial.Port
 	pwm         *pwm.PWM
 	pid         *pid.PID
@@ -94,8 +92,8 @@ const PID_IMAX = 1.0
 const PID_OMIN = 0.0
 const PID_OMAX = 0.5
 
-// the measured motor rpm is determined by read_serial() and used by the motor_control()
-// these are different go-routines, hence we need locking
+// The measured motor rpm is determined by read_serial() and used by the motor_control().
+// These are different goroutines, so we use locking.
 
 // set the motor rpm process value
 func (lidar *LIDAR) set_rpm_pv(rpm float32) {
@@ -113,19 +111,29 @@ func (lidar *LIDAR) get_rpm_pv() float32 {
 }
 
 // Update the PWM value using the PID
-func (lidar *LIDAR) motor_control() {
+func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("lidar.motor_control() enter")
+	defer wg.Done()
+	// perform pid/pwm updates at the LIDAR_MOTOR_PERIOD
+	tick := time.NewTicker(LIDAR_MOTOR_PERIOD * time.Millisecond)
 	for {
-		rpm := lidar.get_rpm_pv()
-		// prevent motor burnout during pid tuning
-		if rpm > LIDAR_RPM_SHUTDOWN {
-			log.Printf("max motor rpm exceeded %f > %f", rpm, LIDAR_RPM_SHUTDOWN)
-			lidar.pwm.Set(0.0)
-			lidar.pid_on = false
+		select {
+		case <-quit:
+			log.Printf("lidar.motor_control() exit")
+			tick.Stop()
+			return
+		case <-tick.C:
+			rpm := lidar.get_rpm_pv()
+			// prevent motor burnout during pid tuning
+			if rpm > LIDAR_RPM_SHUTDOWN {
+				log.Printf("max motor rpm exceeded %f > %f", rpm, LIDAR_RPM_SHUTDOWN)
+				lidar.pwm.Set(0.0)
+				lidar.pid_on = false
+			}
+			if lidar.pid_on {
+				lidar.pwm.Set(lidar.pid.Update(rpm))
+			}
 		}
-		if lidar.pid_on {
-			lidar.pwm.Set(lidar.pid.Update(rpm))
-		}
-		time.Sleep(LIDAR_MOTOR_PERIOD * time.Millisecond)
 	}
 }
 
@@ -256,19 +264,25 @@ func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
 }
 
 // Read the serial port and process the frames
-func (lidar *LIDAR) read_serial() {
+func (lidar *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("lidar.read_serial() enter")
+	defer wg.Done()
 	for {
-		buf := make([]byte, 1024)
-		n, err := lidar.port.Read(buf)
-		if err != nil {
-			log.Printf("error on serial read %s", err)
-		} else {
-			lidar.rx_frame(buf[:n], time.Now())
+		select {
+		case <-quit:
+			log.Printf("lidar.read_serial() exit")
+			return
+		default:
+			buf := make([]byte, 1024)
+			n, err := lidar.port.Read(buf)
+			if err == nil {
+				lidar.rx_frame(buf[:n], time.Now())
+				// Wait a while - there's a tradeoff here between data latency and cpu usage.
+				// A smaller wait time gives lower latency and more cpu consumption.
+				// 300 rpm = 200 ms/rev, so 50 ms is 1/4 revolution
+				time.Sleep(50 * time.Millisecond)
+			}
 		}
-		// Wait a while - there's a tradeoff here between data latency and cpu usage.
-		// A smaller wait time gives lower latency and more cpu consumption.
-		// 300 rpm = 200 ms/rev, so 50 ms is 1/4 revolution
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 
@@ -300,14 +314,13 @@ func (frame *LIDAR_frame) sample(i int) *LIDAR_sample {
 
 //-----------------------------------------------------------------------------
 
-func Open(name, port_name, pwm_name string) (*LIDAR, error) {
+func Open(port_name, pwm_name string) (*LIDAR, error) {
 	var lidar LIDAR
-	lidar.Name = name
 
-	log.Printf("lidar.Open() %s serial=%s pwm=%s", lidar.Name, port_name, pwm_name)
+	log.Printf("lidar.Open() serial=%s pwm=%s", port_name, pwm_name)
 
 	// open the serial port
-	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 1 * time.Millisecond}
+	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 500 * time.Millisecond}
 	port, err := serial.OpenPort(cfg)
 	if err != nil {
 		log.Printf("unable to open serial port %s", port_name)
@@ -316,9 +329,9 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	lidar.port = port
 
 	// open the pwm channel
-	pwm, err := pwm.Open(fmt.Sprintf("%s_pwm", lidar.Name), pwm_name, 0.0)
+	pwm, err := pwm.Open(pwm_name, 0.0)
 	if err != nil {
-		log.Printf("unable to open pwm channel %s", pwm_name)
+		log.Printf("unable to open pwm channel")
 		return nil, err
 	}
 	lidar.pwm = pwm
@@ -339,7 +352,7 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 //-----------------------------------------------------------------------------
 
 func (lidar *LIDAR) Close() error {
-	log.Printf("lidar.Close() %s ", lidar.Name)
+	log.Printf("lidar.Close()")
 	log.Printf("good/bad %d/%d", lidar.good_frames, lidar.bad_frames)
 
 	lidar.pwm.Set(0.0)
@@ -362,10 +375,28 @@ func (lidar *LIDAR) Close() error {
 
 //-----------------------------------------------------------------------------
 
-func (lidar *LIDAR) Process() {
-	log.Printf("lidar.Process() %s", lidar.Name)
-	go lidar.motor_control()
-	go lidar.read_serial()
+func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("lidar.Process() enter")
+	defer wg.Done()
+
+	lidar_wg := &sync.WaitGroup{}
+
+	// start motor control
+	lidar_wg.Add(1)
+	go lidar.motor_control(quit, lidar_wg)
+
+	// start serial port reading
+	lidar_wg.Add(1)
+	go lidar.read_serial(quit, lidar_wg)
+
+	for {
+		select {
+		case <-quit:
+			lidar_wg.Wait()
+			log.Printf("lidar.Process() exit")
+			return
+		}
+	}
 }
 
 //-----------------------------------------------------------------------------

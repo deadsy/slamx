@@ -15,9 +15,8 @@ import (
 )
 
 type PWM struct {
-	Name string
-	Pin  string
-	Val  float32
+	Pin string
+	Val float32
 }
 
 // clamp a value from 0.0 to 1.0
@@ -32,10 +31,9 @@ func clamp(x float32) float32 {
 }
 
 // Open the PWM channel
-func Open(name, pin string, val float32) (*PWM, error) {
-	log.Printf("pwm.Open() %s pin=%s\n", name, pin)
+func Open(pin string, val float32) (*PWM, error) {
+	log.Printf("pwm.Open() pin=%s\n", pin)
 	var pwm PWM
-	pwm.Name = name
 	pwm.Pin = pin
 	pwm.Set(val)
 	return &pwm, nil
@@ -43,13 +41,13 @@ func Open(name, pin string, val float32) (*PWM, error) {
 
 // Close the PWM channel
 func (pwm *PWM) Close() {
-	log.Printf("pwm.Close() %s\n", pwm.Name)
+	log.Printf("pwm.Close()\n")
 	// TODO ...
 }
 
 // Set the PWM value
 func (pwm *PWM) Set(val float32) {
-	log.Printf("pwm.Set() %s = %f\n", pwm.Name, pwm.Val)
+	//log.Printf("pwm.Set() = %f\n", pwm.Val)
 	pwm.Val = clamp(val)
 	// TODO ....
 }

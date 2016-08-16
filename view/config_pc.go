@@ -2,5 +2,5 @@
 
 package view
 
-const WINDOW_H = 640
-const WINDOW_V = 400
+const WINDOW_X = 640
+const WINDOW_Y = 400
