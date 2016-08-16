@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/deadsy/slamx/lidar"
+	"github.com/deadsy/slamx/view"
 )
 
 //-----------------------------------------------------------------------------
@@ -31,6 +32,9 @@ func main() {
 
 	// start the LIDAR process
 	lidar.Process()
+
+	// start the viewing window
+	view.Process()
 
 	running := true
 
