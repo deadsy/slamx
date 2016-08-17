@@ -1,12 +1,26 @@
+//-----------------------------------------------------------------------------
+
+//-----------------------------------------------------------------------------
+
 package view
 
 import (
-	"errors"
-	"fmt"
+	"log"
 	"math"
+	"sync"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
+
+//-----------------------------------------------------------------------------
+
+type View struct {
+	Name     string
+	window   *sdl.Window
+	renderer *sdl.Renderer
+}
+
+//-----------------------------------------------------------------------------
 
 const mm_per_pixel = 2.0
 const pixel_per_mm = 1 / mm_per_pixel
@@ -14,6 +28,8 @@ const pixel_per_mm = 1 / mm_per_pixel
 func d2r(d float32) float32 {
 	return math.Pi * (d / 180.0)
 }
+
+//-----------------------------------------------------------------------------
 
 // world to screen coordinate conversion
 // world = (0,0) is the center of the screen - ie the robot lidar center
@@ -24,50 +40,92 @@ func world2screen(wx, wy float32) (sx, sy int) {
 	return
 }
 
-func plot_xy(renderer *sdl.Renderer, x, y float32) {
+// plot an (x.y) point given in world ccordinates
+func (view *View) plot_xy(x, y float32) {
 	sx, sy := world2screen(x, y)
-	renderer.DrawPoint(sx, sy)
+	view.renderer.DrawPoint(sx, sy)
 }
 
-func plot_polar(renderer *sdl.Renderer, r, theta float32) {
+// plot an (r,theta) polar point given in world coordinates
+func (view *View) plot_polar(r, theta float32) {
 	x := float32(float64(r) * math.Cos(float64(theta)))
 	y := float32(float64(r) * math.Sin(float64(theta)))
-	plot_xy(renderer, x, y)
+	view.plot_xy(x, y)
 }
 
-func Process() error {
+//-----------------------------------------------------------------------------
 
-	sdl.Init(sdl.INIT_EVERYTHING)
+func Open(name string) (*View, error) {
+	var view View
+	view.Name = name
 
-	window, err := sdl.CreateWindow("test", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WINDOW_X, WINDOW_Y, sdl.WINDOW_SHOWN)
+	log.Printf("%s.Open()", view.Name)
+
+	err := sdl.Init(sdl.INIT_EVERYTHING)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Failed to create window: %s\n", err))
+		log.Printf("%s: sdl.Init() failed %s", err)
+		return nil, err
 	}
-	defer window.Destroy()
 
-	renderer, err := sdl.CreateRenderer(window, -1, sdl.RENDERER_ACCELERATED)
+	// create the window
+	window, err := sdl.CreateWindow("slamx", sdl.WINDOWPOS_UNDEFINED, sdl.WINDOWPOS_UNDEFINED, WINDOW_X, WINDOW_Y, sdl.WINDOW_SHOWN)
 	if err != nil {
-		return errors.New(fmt.Sprintf("Failed to create renderer: %s\n", err))
+		log.Printf("%s: sdl.CreateWindow() failed %s", err)
+		return nil, err
 	}
-	defer renderer.Destroy()
+	view.window = window
 
-	renderer.Clear()
+	// create the renderer
+	renderer, err := sdl.CreateRenderer(view.window, -1, sdl.RENDERER_ACCELERATED)
+	if err != nil {
+		log.Printf("%s: sdl.CreateRenderer() failed %s", err)
+		return nil, err
+	}
+	view.renderer = renderer
 
-	renderer.SetDrawColor(255, 255, 255, 255)
+	// setup the renderer
+	view.renderer.SetLogicalSize(WINDOW_X, WINDOW_Y)
 
-	plot_xy(renderer, 0, 0)
-	plot_xy(renderer, -100, 0)
-	plot_xy(renderer, 100, 0)
-	plot_xy(renderer, 0, -100)
-	plot_xy(renderer, 0, 100)
+	view.renderer.SetDrawColor(255, 0, 0, 255)
+	view.renderer.Clear()
+
+	view.renderer.SetDrawColor(255, 255, 255, 255)
+
+	view.plot_xy(0, 0)
+	view.plot_xy(-100, 0)
+	view.plot_xy(100, 0)
+	view.plot_xy(0, -100)
+	view.plot_xy(0, 100)
 
 	for i := 0; i < 360; i++ {
-		plot_polar(renderer, 200, d2r(float32(i)))
+		view.plot_polar(200, d2r(float32(i)))
 	}
 
-	renderer.Present()
+	view.renderer.Present()
 
-	sdl.Delay(5000)
+	return &view, nil
+}
+
+//-----------------------------------------------------------------------------
+
+func (view *View) Close() {
+	log.Printf("%s.Close()", view.Name)
 	sdl.Quit()
-	return nil
+	view.renderer.Destroy()
+	view.window.Destroy()
+}
+
+//-----------------------------------------------------------------------------
+
+func (view *View) Process(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("%s.Process() enter", view.Name)
+	defer wg.Done()
+
+	for {
+		select {
+		case <-quit:
+			log.Printf("%s.Process() exit", view.Name)
+			return
+		}
+	}
 }

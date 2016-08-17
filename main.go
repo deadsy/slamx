@@ -25,6 +25,11 @@ func main() {
 		log.Fatal("unable to open lidar device")
 	}
 
+	view0, err := view.Open("view0")
+	if err != nil {
+		log.Fatal("unable to open view window")
+	}
+
 	quit := make(chan bool)
 	wg := &sync.WaitGroup{}
 
@@ -32,8 +37,9 @@ func main() {
 	wg.Add(1)
 	go lidar0.Process(quit, wg)
 
-	// start the viewing window
-	view.Process()
+	// start the view window
+	wg.Add(1)
+	go view0.Process(quit, wg)
 
 	running := true
 
@@ -56,6 +62,8 @@ func main() {
 	wg.Wait()
 
 	lidar0.Close()
+	view0.Close()
+
 	os.Exit(0)
 }
 
