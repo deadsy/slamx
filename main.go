@@ -37,10 +37,6 @@ func main() {
 	wg.Add(1)
 	go lidar0.Process(quit, wg)
 
-	// start the view window
-	wg.Add(1)
-	go view0.Process(quit, wg)
-
 	running := true
 
 	// capture Ctrl-c
@@ -53,9 +49,11 @@ func main() {
 		}
 	}()
 
+	angle := 0
 	for running {
-		time.Sleep(1 * time.Second)
-		log.Printf("main() timeout")
+		time.Sleep(100 * time.Millisecond)
+		view0.Render(float32(angle))
+		angle += 1
 	}
 
 	close(quit)

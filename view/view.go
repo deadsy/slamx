@@ -1,5 +1,15 @@
 //-----------------------------------------------------------------------------
+/*
 
+A Graphical View of System State
+
+Notes:
+
+1) This code uses the SDL2 library to do graphics.
+2) SDL2 is not multithreading friendly - it uses thread local storage.
+   To avoid problems We make all calls to SDL2 from the main thread.
+
+*/
 //-----------------------------------------------------------------------------
 
 package view
@@ -7,7 +17,6 @@ package view
 import (
 	"log"
 	"math"
-	"sync"
 
 	"github.com/veandco/go-sdl2/sdl"
 )
@@ -86,23 +95,6 @@ func Open(name string) (*View, error) {
 	// setup the renderer
 	view.renderer.SetLogicalSize(WINDOW_X, WINDOW_Y)
 
-	view.renderer.SetDrawColor(255, 0, 0, 255)
-	view.renderer.Clear()
-
-	view.renderer.SetDrawColor(255, 255, 255, 255)
-
-	view.plot_xy(0, 0)
-	view.plot_xy(-100, 0)
-	view.plot_xy(100, 0)
-	view.plot_xy(0, -100)
-	view.plot_xy(0, 100)
-
-	for i := 0; i < 360; i++ {
-		view.plot_polar(200, d2r(float32(i)))
-	}
-
-	view.renderer.Present()
-
 	return &view, nil
 }
 
@@ -117,15 +109,30 @@ func (view *View) Close() {
 
 //-----------------------------------------------------------------------------
 
-func (view *View) Process(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("%s.Process() enter", view.Name)
-	defer wg.Done()
+const steps = 100
 
-	for {
-		select {
-		case <-quit:
-			log.Printf("%s.Process() exit", view.Name)
-			return
-		}
+func (view *View) line(tofs, t0, t1, x float32) {
+	dt := (t1 - t0) / steps
+	t := t0
+	for i := 0; i < steps; i++ {
+		d := float32(float64(x) / math.Cos(float64(t)))
+		view.plot_polar(d, t+tofs)
+		t += dt
 	}
 }
+
+func (view *View) Render(ofs float32) {
+	// clear the background
+	view.renderer.SetDrawColor(0, 0, 0, 255)
+	view.renderer.Clear()
+	// draw a rotated square
+	view.renderer.SetDrawColor(255, 255, 255, 255)
+	view.line(d2r(0+ofs), d2r(-45), d2r(45), 200)
+	view.line(d2r(90+ofs), d2r(-45), d2r(45), 200)
+	view.line(d2r(180+ofs), d2r(-45), d2r(45), 200)
+	view.line(d2r(270+ofs), d2r(-45), d2r(45), 200)
+	// render to the window
+	view.renderer.Present()
+}
+
+//-----------------------------------------------------------------------------
