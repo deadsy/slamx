@@ -148,7 +148,7 @@ func (view *View) Events() bool {
 	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
 		switch t := event.(type) {
 		case *sdl.QuitEvent:
-      log.Printf("sdl event %+v", t)
+			log.Printf("sdl event %+v", t)
 			rc = false
 		case *sdl.MouseMotionEvent:
 		case *sdl.MouseButtonEvent:
