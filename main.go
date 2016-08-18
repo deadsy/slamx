@@ -7,10 +7,7 @@ package main
 import (
 	"log"
 	"os"
-	"os/signal"
 	"sync"
-	"syscall"
-	"time"
 
 	"github.com/deadsy/slamx/lidar"
 	"github.com/deadsy/slamx/view"
@@ -20,14 +17,14 @@ import (
 
 func main() {
 
-	lidar0, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
-	if err != nil {
-		log.Fatal("unable to open lidar device")
-	}
-
 	view0, err := view.Open("view0")
 	if err != nil {
 		log.Fatal("unable to open view window")
+	}
+
+	lidar0, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
+	if err != nil {
+		log.Fatal("unable to open lidar device")
 	}
 
 	quit := make(chan bool)
@@ -39,23 +36,14 @@ func main() {
 
 	running := true
 
-	// capture Ctrl-c
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() {
-		for sig := range c {
-			log.Printf("captured %v, exiting", sig)
-			running = false
-		}
-	}()
-
 	angle := 0
 	for running {
-		time.Sleep(100 * time.Millisecond)
+		view0.Delay(10)
 		view0.Render(float32(angle))
 		angle += 1
 	}
 
+	// stop all go routines
 	close(quit)
 	wg.Wait()
 
