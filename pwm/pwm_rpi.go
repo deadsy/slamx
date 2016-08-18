@@ -62,7 +62,7 @@ func (pwm *PWM) write(msg string) error {
 //-----------------------------------------------------------------------------
 
 // Open the PWM channel
-func Open(pin string, val float32) (*PWM, error) {
+func Open(name, pin string, val float32) (*PWM, error) {
 	var pwm PWM
 	pwm.Name = name
 	log.Printf("%s.Open() pin=%s", pwm.Name, pin)
