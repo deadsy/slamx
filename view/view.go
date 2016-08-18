@@ -142,3 +142,29 @@ func (view *View) Render(ofs float32) {
 }
 
 //-----------------------------------------------------------------------------
+
+func (view *View) Events() bool {
+	rc := true
+	for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+		switch t := event.(type) {
+		case *sdl.QuitEvent:
+      log.Printf("sdl event %+v", t)
+			rc = false
+		case *sdl.MouseMotionEvent:
+		case *sdl.MouseButtonEvent:
+		case *sdl.MouseWheelEvent:
+		case *sdl.KeyDownEvent:
+		case *sdl.KeyUpEvent:
+		case *sdl.JoyAxisEvent:
+		case *sdl.JoyBallEvent:
+		case *sdl.JoyButtonEvent:
+		case *sdl.JoyHatEvent:
+		case *sdl.JoyDeviceEvent:
+		default:
+			// log.Printf("event %+v", t)
+		}
+	}
+	return rc
+}
+
+//-----------------------------------------------------------------------------

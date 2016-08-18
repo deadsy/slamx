@@ -34,13 +34,14 @@ func main() {
 	wg.Add(1)
 	go lidar0.Process(quit, wg)
 
+	// run the event loop
 	running := true
-
 	angle := 0
 	for running {
-		view0.Delay(10)
+		running = view0.Events()
 		view0.Render(float32(angle))
 		angle += 1
+		view0.Delay(33)
 	}
 
 	// stop all go routines
