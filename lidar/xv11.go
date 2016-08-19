@@ -75,6 +75,7 @@ type LIDAR struct {
 	ofs         int         // offset into frame data
 	good_frames uint        // good frames rx-ed
 	bad_frames  uint        // bad frames rx-ed (invalid checksum)
+	scan        LIDAR_scan  // current scan data
 }
 
 //-----------------------------------------------------------------------------
@@ -137,6 +138,46 @@ func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
 			}
 		}
 	}
+}
+
+//-----------------------------------------------------------------------------
+// Samples and Scans
+
+const SAMPLES_PER_SCAN = 360
+
+type LIDAR_sample struct {
+	no_data   bool   // No return/max range/too low of reflectivity
+	too_close bool   // object too close
+	dist      uint16 // distance in mm
+	ss        uint16 // signal strength
+}
+
+type LIDAR_scan struct {
+	idx  int
+	data [SAMPLES_PER_SCAN]LIDAR_sample
+}
+
+func (scan *LIDAR_scan) empty() {
+	// mark the scan as empty
+	for i, _ := range scan.data {
+		scan.data[i].no_data = true
+	}
+	scan.idx = 0
+}
+
+func (scan *LIDAR_scan) add_sample(f *LIDAR_frame, idx int) {
+
+	ofs := LIDAR_SAMPLE_OFS + (idx * LIDAR_SAMPLE_SIZE)
+	b0 := f.data[ofs]
+	b1 := f.data[ofs+1]
+	b2 := f.data[ofs+2]
+	b3 := f.data[ofs+3]
+
+	s := &scan.data[f.angle()+idx]
+	s.no_data = (b0>>7)&1 != 0
+	s.too_close = (b0>>6)&1 != 0
+	s.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
+	s.ss = (uint16(b2) << 8) + uint16(b3)
 }
 
 //-----------------------------------------------------------------------------
@@ -208,15 +249,22 @@ func (frame *LIDAR_frame) angle() int {
 // process a received lidar frame
 func (lidar *LIDAR) process_frame() {
 	f := &lidar.frame
-	log.Printf("%s: rpm %f theta %d", lidar.Name, f.rpm(), f.angle())
 	// set rpm for the PID process value
 	lidar.set_rpm_pv(f.rpm())
-
-	// 	s0 := f.sample(0)
-	// 	s1 := f.sample(1)
-	// 	s2 := f.sample(2)
-	// 	s3 := f.sample(3)
-	//log.Printf("%d %d %d %d", s0.dist, s1.dist, s2.dist, s3.dist)
+	// add the frame samples to the current scan
+	idx := f.angle()
+	if idx < lidar.scan.idx {
+		// report the scan
+		log.Printf("%s: scan complete", lidar.Name)
+		// reset
+		lidar.scan.empty()
+	}
+	// add the 4 samples
+	lidar.scan.add_sample(f, 0)
+	lidar.scan.add_sample(f, 1)
+	lidar.scan.add_sample(f, 2)
+	lidar.scan.add_sample(f, 3)
+	lidar.scan.idx = idx + 4
 }
 
 // receive a lidar frame from a buffer
@@ -289,32 +337,6 @@ func (lidar *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
 }
 
 //-----------------------------------------------------------------------------
-// LIDAR Sample
-
-type LIDAR_sample struct {
-	no_data   bool   // No return/max range/too low of reflectivity
-	too_close bool   // object too close
-	dist      uint16 // distance in mm
-	ss        uint16 // signal strength
-}
-
-// get the i-th sample from the frame, i = 0..3
-func (frame *LIDAR_frame) sample(i int) *LIDAR_sample {
-	ofs := LIDAR_SAMPLE_OFS + (i * LIDAR_SAMPLE_SIZE)
-	b0 := frame.data[ofs]
-	b1 := frame.data[ofs+1]
-	b2 := frame.data[ofs+2]
-	b3 := frame.data[ofs+3]
-
-	var sample LIDAR_sample
-	sample.no_data = (b0>>7)&1 != 0
-	sample.too_close = (b0>>6)&1 != 0
-	sample.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
-	sample.ss = (uint16(b2) << 8) + uint16(b3)
-	return &sample
-}
-
-//-----------------------------------------------------------------------------
 
 func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	var lidar LIDAR
@@ -348,6 +370,9 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	pid.Set(LIDAR_RPM)
 	lidar.pid = pid
 	lidar.pid_on = true
+
+	// the scan starts off empty
+	lidar.scan.empty()
 
 	return &lidar, nil
 }
