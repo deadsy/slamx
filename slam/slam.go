@@ -53,7 +53,14 @@ type Scan struct {
 
 //-----------------------------------------------------------------------------
 
-func Map_Alloc(name string, size_pixels int, size_meters float64) *Map {
+// out of bounds, true if val < 0 or val >= bound
+func oob(val, bound int) bool {
+	return (val < 0) || (val >= bound)
+}
+
+//-----------------------------------------------------------------------------
+
+func Map_Init(name string, size_pixels int, size_meters float64) *Map {
 	var m Map
 	m.Name = name
 	m.size_pixels = size_pixels
@@ -64,6 +71,27 @@ func Map_Alloc(name string, size_pixels int, size_meters float64) *Map {
 		m.pixels[i] = (OBSTACLE + NO_OBSTACLE) / 2
 	}
 	return &m
+}
+
+//-----------------------------------------------------------------------------
+/* Scan Operations
+
+The LIDAR provides us with a set of (angle, distance) values.
+We want to convert this to (x,y) coordinates in the 2D world model.
+To do this we need the LIDAR position (x,y,theta).
+The LIDAR motion may be significant during the scan.
+We'll improve accuracy by adding in the LIDAR velocity (dx,dy,dtheta).
+The time between scan samples can be derived from the rotational speed of the LIDAR
+
+The samples from the LIDAR maybe considered too coarse. They can be upsampled by
+some integer factor to give scan values with a finer resolution. I don't plan to
+do any interpolation between upsamples. That may be the wrong thing to do,
+although any interpolation is likely to lead to strangeness at sharp object
+boundaries (distance discontinuities).
+*/
+
+// Update the scan with some new LIDAR samples
+func (scan *Scan) Update(samples []lidar.Sample) {
 }
 
 //-----------------------------------------------------------------------------
