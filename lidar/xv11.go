@@ -255,7 +255,7 @@ func (lidar *LIDAR) process_frame() {
 	idx := f.angle()
 	if idx < lidar.scan.idx {
 		// report the scan
-		log.Printf("%s: scan complete", lidar.Name)
+		log.Printf("%s: scan complete (%.1f rpm)", lidar.Name, f.rpm())
 		// reset
 		lidar.scan.empty()
 	}
