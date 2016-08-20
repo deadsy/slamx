@@ -32,16 +32,22 @@ func main() {
 
 	// start the LIDAR process
 	wg.Add(1)
-	go lidar0.Process(quit, wg)
+	scan_ch := make(chan lidar.Scan_2D)
+	go lidar0.Process(quit, wg, scan_ch)
 
 	// run the event loop
 	running := true
 	angle := 0
 	for running {
-		running = view0.Events()
-		view0.Render(float32(angle))
-		angle += 1
-		view0.Delay(33)
+		select {
+		case scan := <-scan_ch:
+			log.Printf("scan rxed: %d", len(scan.Samples))
+		default:
+			running = view0.Events()
+			view0.Render(float32(angle))
+			angle += 1
+			view0.Delay(33)
+		}
 	}
 
 	// stop all go routines

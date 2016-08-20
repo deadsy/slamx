@@ -69,15 +69,16 @@ type LIDAR struct {
 	port        *serial.Port
 	pwm         *pwm.PWM
 	pid         *pid.PID
-	rpm_lock    sync.Mutex  // lock for access to rpm
-	rpm         float32     // measured rpm
-	pid_on      bool        // is the PID turned on?
-	frame       LIDAR_frame // frame being read from serial
-	ofs         int         // offset into frame data
-	good_frames uint        // good frames rx-ed
-	bad_frames  uint        // bad frames rx-ed (invalid checksum)
-	idx         int         // current scan index
-	scan        Scan_2D     // scan data
+	rpm_lock    sync.Mutex     // lock for access to rpm
+	rpm         float32        // measured rpm
+	pid_on      bool           // is the PID turned on?
+	frame       LIDAR_frame    // frame being read from serial
+	ofs         int            // offset into frame data
+	good_frames uint           // good frames rx-ed
+	bad_frames  uint           // bad frames rx-ed (invalid checksum)
+	scan_ch     chan<- Scan_2D // channel for reporting scan data
+	scan_idx    int            // current scan index
+	scan        *Scan_2D       // current scan data
 }
 
 //-----------------------------------------------------------------------------
@@ -147,13 +148,11 @@ func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
 
 const SAMPLES_PER_SCAN = 360
 
-func (lidar *LIDAR) reset_scan() {
-	// mark the scan as empty
-	scan := lidar.scan
-	for i, _ := range scan.samples {
-		scan.samples[i].no_data = true
-	}
-	lidar.idx = 0
+func (lidar *LIDAR) alloc_scan() {
+	var scan Scan_2D
+	scan.Samples = make([]Sample_2D, SAMPLES_PER_SCAN)
+	lidar.scan_idx = 0
+	lidar.scan = &scan
 }
 
 func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
@@ -164,16 +163,16 @@ func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
 	b3 := f.data[ofs+3]
 
 	idx += base
-	s := &scan.samples[idx]
-	s.no_data = (b1>>7)&1 != 0
-	s.too_close = (b1>>6)&1 != 0
-	s.angle = util.DtoR(float32(idx))
+	s := &scan.Samples[idx]
+	s.Good = (b1>>7)&1 == 0
+	s.Too_Close = (b1>>6)&1 != 0
+	s.Angle = util.DtoR(float32(idx))
 
 	dist := ((int(b1) & 0x3f) << 8) + int(b0)
 	ss := (int(b3) << 8) + int(b2)
 
-	s.dist = float32(dist) / 1000.0
-	s.ss = float32(ss)
+	s.Distance = float32(dist) / 1000.0
+	s.Signal_Strength = float32(ss)
 }
 
 //-----------------------------------------------------------------------------
@@ -249,17 +248,19 @@ func (lidar *LIDAR) process_frame() {
 	lidar.set_rpm_pv(f.rpm())
 	// add the frame samples to the current scan
 	idx := f.angle()
-	if idx < lidar.idx {
+	if idx < lidar.scan_idx {
 		// report the scan
 		log.Printf("%s: scan complete (%.1f rpm)", lidar.Name, f.rpm())
-		lidar.reset_scan()
+		lidar.scan_ch <- *lidar.scan
+		// alocate the next scan
+		lidar.alloc_scan()
 	}
 	// add the 4 samples
 	lidar.scan.add_sample(f, idx, 0)
 	lidar.scan.add_sample(f, idx, 1)
 	lidar.scan.add_sample(f, idx, 2)
 	lidar.scan.add_sample(f, idx, 3)
-	lidar.idx = idx + 4
+	lidar.scan_idx = idx + 4
 }
 
 // receive a lidar frame from a buffer
@@ -366,10 +367,8 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	lidar.pid = pid
 	lidar.pid_on = true
 
-	// allocate the scan samples
-	lidar.scan.samples = make([]Sample_2D, SAMPLES_PER_SCAN)
-	// the scan starts off empty
-	lidar.reset_scan()
+	// allocate the initial scan
+	lidar.alloc_scan()
 
 	return &lidar, nil
 }
@@ -400,9 +399,12 @@ func (lidar *LIDAR) Close() error {
 
 //-----------------------------------------------------------------------------
 
-func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
+func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup, scan_ch chan<- Scan_2D) {
 	log.Printf("%s.Process() enter", lidar.Name)
 	defer wg.Done()
+
+	// record the channel to report scans on
+	lidar.scan_ch = scan_ch
 
 	lidar_wg := &sync.WaitGroup{}
 
