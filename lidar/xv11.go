@@ -58,6 +58,7 @@ import (
 
 	"github.com/deadsy/slamx/pid"
 	"github.com/deadsy/slamx/pwm"
+	"github.com/deadsy/slamx/util"
 	"github.com/tarm/serial"
 )
 
@@ -75,7 +76,8 @@ type LIDAR struct {
 	ofs         int         // offset into frame data
 	good_frames uint        // good frames rx-ed
 	bad_frames  uint        // bad frames rx-ed (invalid checksum)
-	scan        LIDAR_scan  // current scan data
+	idx         int         // current scan index
+	scan        Scan_2D     // scan data
 }
 
 //-----------------------------------------------------------------------------
@@ -145,39 +147,32 @@ func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
 
 const SAMPLES_PER_SCAN = 360
 
-type LIDAR_sample struct {
-	no_data   bool   // No return/max range/too low of reflectivity
-	too_close bool   // object too close
-	dist      uint16 // distance in mm
-	ss        uint16 // signal strength
-}
-
-type LIDAR_scan struct {
-	idx  int
-	data [SAMPLES_PER_SCAN]LIDAR_sample
-}
-
-func (scan *LIDAR_scan) empty() {
+func (lidar *LIDAR) reset_scan() {
 	// mark the scan as empty
-	for i, _ := range scan.data {
-		scan.data[i].no_data = true
+	scan := lidar.scan
+	for i, _ := range scan.samples {
+		scan.samples[i].no_data = true
 	}
-	scan.idx = 0
+	lidar.idx = 0
 }
 
-func (scan *LIDAR_scan) add_sample(f *LIDAR_frame, idx int) {
-
+func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
 	ofs := LIDAR_SAMPLE_OFS + (idx * LIDAR_SAMPLE_SIZE)
 	b0 := f.data[ofs]
 	b1 := f.data[ofs+1]
 	b2 := f.data[ofs+2]
 	b3 := f.data[ofs+3]
 
-	s := &scan.data[f.angle()+idx]
+	log.Printf("%02x %02x %02x %02x", b0, b1, b2, b3)
+
+	idx += base
+	s := &scan.samples[idx]
 	s.no_data = (b0>>7)&1 != 0
 	s.too_close = (b0>>6)&1 != 0
-	s.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
-	s.ss = (uint16(b2) << 8) + uint16(b3)
+	s.angle = util.DtoR(float32(idx))
+
+	//s.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
+	//s.ss = (uint16(b2) << 8) + uint16(b3)
 }
 
 //-----------------------------------------------------------------------------
@@ -253,18 +248,17 @@ func (lidar *LIDAR) process_frame() {
 	lidar.set_rpm_pv(f.rpm())
 	// add the frame samples to the current scan
 	idx := f.angle()
-	if idx < lidar.scan.idx {
+	if idx < lidar.idx {
 		// report the scan
 		log.Printf("%s: scan complete (%.1f rpm)", lidar.Name, f.rpm())
-		// reset
-		lidar.scan.empty()
+		lidar.reset_scan()
 	}
 	// add the 4 samples
-	lidar.scan.add_sample(f, 0)
-	lidar.scan.add_sample(f, 1)
-	lidar.scan.add_sample(f, 2)
-	lidar.scan.add_sample(f, 3)
-	lidar.scan.idx = idx + 4
+	lidar.scan.add_sample(f, idx, 0)
+	lidar.scan.add_sample(f, idx, 1)
+	lidar.scan.add_sample(f, idx, 2)
+	lidar.scan.add_sample(f, idx, 3)
+	lidar.idx = idx + 4
 }
 
 // receive a lidar frame from a buffer
@@ -371,8 +365,10 @@ func Open(name, port_name, pwm_name string) (*LIDAR, error) {
 	lidar.pid = pid
 	lidar.pid_on = true
 
+	// allocate the scan samples
+	lidar.scan.samples = make([]Sample_2D, SAMPLES_PER_SCAN)
 	// the scan starts off empty
-	lidar.scan.empty()
+	lidar.reset_scan()
 
 	return &lidar, nil
 }

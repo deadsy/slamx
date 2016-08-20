@@ -18,6 +18,7 @@ import (
 	"log"
 	"math"
 
+	"github.com/deadsy/slamx/util"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -33,10 +34,6 @@ type View struct {
 
 const mm_per_pixel = 2.0
 const pixel_per_mm = 1 / mm_per_pixel
-
-func d2r(d float32) float32 {
-	return math.Pi * (d / 180.0)
-}
 
 //-----------------------------------------------------------------------------
 
@@ -133,10 +130,10 @@ func (view *View) Render(ofs float32) {
 	view.renderer.Clear()
 	// draw a rotated square
 	view.renderer.SetDrawColor(255, 255, 255, 255)
-	view.line(d2r(0+ofs), d2r(-45), d2r(45), 200)
-	view.line(d2r(90+ofs), d2r(-45), d2r(45), 200)
-	view.line(d2r(180+ofs), d2r(-45), d2r(45), 200)
-	view.line(d2r(270+ofs), d2r(-45), d2r(45), 200)
+	view.line(util.DtoR(float32(0+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+	view.line(util.DtoR(float32(90+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+	view.line(util.DtoR(float32(180+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+	view.line(util.DtoR(float32(270+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
 	// render to the window
 	view.renderer.Present()
 }
