@@ -19,6 +19,7 @@ import (
 	"math"
 
 	"github.com/deadsy/slamx/lidar"
+	"github.com/deadsy/slamx/util"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -32,8 +33,7 @@ type View struct {
 
 //-----------------------------------------------------------------------------
 
-const pixel_per_meter = 50.0
-const meter_per_pixel = 1.0 / pixel_per_meter
+const pixel_per_meter = 64.0
 
 //-----------------------------------------------------------------------------
 
@@ -124,30 +124,34 @@ func (view *View) line(tofs, t0, t1, x float32) {
 	}
 }
 
-// func (view *View) Render(ofs float32) {
-// 	// clear the background
-// 	view.renderer.SetDrawColor(0, 0, 0, 255)
-// 	view.renderer.Clear()
-// 	// draw a rotated square
-// 	view.renderer.SetDrawColor(255, 255, 255, 255)
-// 	view.line(util.DtoR(float32(0+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-// 	view.line(util.DtoR(float32(90+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-// 	view.line(util.DtoR(float32(180+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-// 	view.line(util.DtoR(float32(270+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-// 	// render to the window
-// 	view.renderer.Present()
-// }
+func (view *View) Render2(ofs float32) {
+	// clear the background
+	view.renderer.SetDrawColor(0, 0, 0, 255)
+	view.renderer.Clear()
+	// draw a rotated square
+	view.renderer.SetDrawColor(255, 255, 255, 255)
+	view.line(util.DtoR(float32(0+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 1)
+	view.line(util.DtoR(float32(90+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 1)
+	view.line(util.DtoR(float32(180+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 1)
+	view.line(util.DtoR(float32(270+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 1)
+	// render to the window
+	view.renderer.Present()
+}
 
 func (view *View) Render(scan *lidar.Scan_2D) {
 	// clear the background
 	view.renderer.SetDrawColor(0, 0, 0, 255)
 	view.renderer.Clear()
+	view.renderer.SetDrawColor(255, 255, 255, 255)
+	good_count := 0
 	for _, s := range scan.Samples {
 		if s.Good {
 			view.plot_polar(s.Distance, s.Angle)
+			good_count += 1
 		}
 	}
-	// render to the window
+	log.Printf("rendered: %d", good_count)
+	//render to the window
 	view.renderer.Present()
 }
 

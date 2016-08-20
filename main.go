@@ -35,15 +35,20 @@ func main() {
 	scan_ch := make(chan lidar.Scan_2D)
 	go lidar0.Process(quit, wg, scan_ch)
 
+	angle := float32(0)
+
 	// run the event loop
 	running := true
 	for running {
 		select {
 		case scan := <-scan_ch:
-			log.Printf("scan rxed: %d", len(scan.Samples))
-			view0.Render(&scan)
+			log.Printf("rxed %d", len(scan.Samples))
+			//view0.Render(&scan)
+			view0.Render2(angle)
+			angle += 1
 		default:
 			running = view0.Events()
+			view0.Delay(30)
 		}
 	}
 
