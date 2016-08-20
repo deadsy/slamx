@@ -163,16 +163,17 @@ func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
 	b2 := f.data[ofs+2]
 	b3 := f.data[ofs+3]
 
-	log.Printf("%02x %02x %02x %02x", b0, b1, b2, b3)
-
 	idx += base
 	s := &scan.samples[idx]
-	s.no_data = (b0>>7)&1 != 0
-	s.too_close = (b0>>6)&1 != 0
+	s.no_data = (b1>>7)&1 != 0
+	s.too_close = (b1>>6)&1 != 0
 	s.angle = util.DtoR(float32(idx))
 
-	//s.dist = ((uint16(b0) & 0x3f) << 8) + uint16(b1)
-	//s.ss = (uint16(b2) << 8) + uint16(b3)
+	dist := ((int(b1) & 0x3f) << 8) + int(b0)
+	ss := (int(b3) << 8) + int(b2)
+
+	s.dist = float32(dist) / 1000.0
+	s.ss = float32(ss)
 }
 
 //-----------------------------------------------------------------------------
