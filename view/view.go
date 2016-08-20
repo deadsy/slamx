@@ -18,7 +18,7 @@ import (
 	"log"
 	"math"
 
-	"github.com/deadsy/slamx/util"
+	"github.com/deadsy/slamx/lidar"
 	"github.com/veandco/go-sdl2/sdl"
 )
 
@@ -32,8 +32,8 @@ type View struct {
 
 //-----------------------------------------------------------------------------
 
-const mm_per_pixel = 2.0
-const pixel_per_mm = 1 / mm_per_pixel
+const pixel_per_meter = 50.0
+const meter_per_pixel = 1.0 / pixel_per_meter
 
 //-----------------------------------------------------------------------------
 
@@ -41,8 +41,8 @@ const pixel_per_mm = 1 / mm_per_pixel
 // world = (0,0) is the center of the screen - ie the robot lidar center
 // screen (0,0) is the top left corner of the display window
 func world2screen(wx, wy float32) (sx, sy int) {
-	sx = int((wx * pixel_per_mm) + (float32(WINDOW_X) / 2.0))
-	sy = int((-wy * pixel_per_mm) + (float32(WINDOW_Y) / 2.0))
+	sx = int((wx * pixel_per_meter) + (float32(WINDOW_X) / 2.0))
+	sy = int((-wy * pixel_per_meter) + (float32(WINDOW_Y) / 2.0))
 	return
 }
 
@@ -124,16 +124,29 @@ func (view *View) line(tofs, t0, t1, x float32) {
 	}
 }
 
-func (view *View) Render(ofs float32) {
+// func (view *View) Render(ofs float32) {
+// 	// clear the background
+// 	view.renderer.SetDrawColor(0, 0, 0, 255)
+// 	view.renderer.Clear()
+// 	// draw a rotated square
+// 	view.renderer.SetDrawColor(255, 255, 255, 255)
+// 	view.line(util.DtoR(float32(0+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+// 	view.line(util.DtoR(float32(90+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+// 	view.line(util.DtoR(float32(180+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+// 	view.line(util.DtoR(float32(270+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+// 	// render to the window
+// 	view.renderer.Present()
+// }
+
+func (view *View) Render(scan *lidar.Scan_2D) {
 	// clear the background
 	view.renderer.SetDrawColor(0, 0, 0, 255)
 	view.renderer.Clear()
-	// draw a rotated square
-	view.renderer.SetDrawColor(255, 255, 255, 255)
-	view.line(util.DtoR(float32(0+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-	view.line(util.DtoR(float32(90+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-	view.line(util.DtoR(float32(180+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
-	view.line(util.DtoR(float32(270+ofs)), util.DtoR(float32(-45)), util.DtoR(float32(45)), 200)
+	for _, s := range scan.Samples {
+		if s.Good {
+			view.plot_polar(s.Distance, s.Angle)
+		}
+	}
 	// render to the window
 	view.renderer.Present()
 }

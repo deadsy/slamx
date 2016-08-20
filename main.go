@@ -37,16 +37,13 @@ func main() {
 
 	// run the event loop
 	running := true
-	angle := 0
 	for running {
 		select {
 		case scan := <-scan_ch:
 			log.Printf("scan rxed: %d", len(scan.Samples))
+			view0.Render(&scan)
 		default:
 			running = view0.Events()
-			view0.Render(float32(angle))
-			angle += 1
-			view0.Delay(33)
 		}
 	}
 
