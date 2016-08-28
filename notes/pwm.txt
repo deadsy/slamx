@@ -1,0 +1,41 @@
+Input Side:
+
+PWMA - Channel A PWM
+AIN2 - Channel A Input 2
+AIN1 - Channel A Input 1
+STBY - Standby (active low)
+BIN1 - Channel B Input 1
+BIN2 - Channel B Input 2
+PWMB - Channel B PWM
+GND
+
+Output Side:
+
+VM - Motor Supply 4.5V - 13.5V
+Vcc - Digital Supply 2.7V - 5.5V
+GND
+A01 - Channel A Output 1
+A02 - Channel A Output 2
+B02 - Channel B Output 2
+B01 - Channel B Output 1
+GND
+
+All grounds are wired together.
+
+In our case:
+
+Vm = 7.2V (NiMH battery voltage)
+Vcc = 3.3V (RPi3 signal voltage)
+GND = common
+
+PWMA = gpio21 on RPi3
+AIN2 = L
+AIN1 = H
+STDBY = H
+
+A01 = motor -ve
+A02 = motor +ve
+
+* AIN1/2 control CW/CCW - check lidar direction
+
+Channel B is unused
