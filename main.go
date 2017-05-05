@@ -5,15 +5,112 @@
 package main
 
 import (
-	"log"
+	"fmt"
 	"os"
-	"sync"
 
-	"github.com/deadsy/slamx/lidar"
-	"github.com/deadsy/slamx/view"
+	cli "github.com/deadsy/go-cli"
+	//"github.com/deadsy/slamx/lidar"
+	//"github.com/deadsy/slamx/view"
 )
 
 //-----------------------------------------------------------------------------
+// cli related leaf functions
+
+var cmd_help = cli.Leaf{
+	Descr: "general help",
+	F: func(c *cli.CLI, args []string) {
+		c.GeneralHelp()
+	},
+}
+
+var cmd_history = cli.Leaf{
+	Descr: "command history",
+	F: func(c *cli.CLI, args []string) {
+		c.SetLine(c.DisplayHistory(args))
+	},
+}
+
+var cmd_exit = cli.Leaf{
+	Descr: "exit application",
+	F: func(c *cli.CLI, args []string) {
+		c.Exit()
+	},
+}
+
+//-----------------------------------------------------------------------------
+// LIDAR menu
+
+var lidar_start = cli.Leaf{
+	Descr: "start lidar scanning",
+	F: func(c *cli.CLI, args []string) {
+		c.Put("TODO")
+	},
+}
+
+var lidar_status = cli.Leaf{
+	Descr: "show lidar status",
+	F: func(c *cli.CLI, args []string) {
+		c.Put("TODO")
+	},
+}
+
+var lidar_stop = cli.Leaf{
+	Descr: "stop lidar scanning",
+	F: func(c *cli.CLI, args []string) {
+		c.Put("TODO")
+	},
+}
+
+// lidar submenu items
+var lidar_menu = cli.Menu{
+	{"start", lidar_start},
+	{"status", lidar_status},
+	{"stop", lidar_stop},
+}
+
+//-----------------------------------------------------------------------------
+
+// root menu
+var menu_root = cli.Menu{
+	{"exit", cmd_exit},
+	{"help", cmd_help},
+	{"history", cmd_history, cli.HistoryHelp},
+	{"lidar", lidar_menu, "lidar functions"},
+}
+
+//-----------------------------------------------------------------------------
+
+type user_app struct {
+}
+
+func NewUserApp() *user_app {
+	app := user_app{}
+	return &app
+}
+
+func (user *user_app) Put(s string) {
+	fmt.Printf("%s", s)
+}
+
+//-----------------------------------------------------------------------------
+
+func main() {
+
+	hpath := "history.txt"
+	c := cli.NewCLI(NewUserApp())
+	c.HistoryLoad(hpath)
+	c.SetRoot(menu_root)
+	c.SetPrompt("slamx> ")
+	for c.Running() {
+		c.Run()
+	}
+	c.HistorySave(hpath)
+	os.Exit(0)
+}
+
+//-----------------------------------------------------------------------------
+
+/*
 
 func main() {
 
@@ -61,5 +158,7 @@ func main() {
 
 	os.Exit(0)
 }
+
+*/
 
 //-----------------------------------------------------------------------------
