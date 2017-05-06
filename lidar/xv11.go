@@ -65,20 +65,24 @@ import (
 //-----------------------------------------------------------------------------
 
 type LIDAR struct {
-	Name        string // user name for this device
-	port        *serial.Port
-	pwm         *pwm.PWM
-	pid         *pid.PID
-	rpm_lock    sync.Mutex     // lock for access to rpm
-	rpm         float32        // measured rpm
-	pid_on      bool           // is the PID turned on?
-	frame       LIDAR_frame    // frame being read from serial
-	ofs         int            // offset into frame data
-	good_frames uint           // good frames rx-ed
-	bad_frames  uint           // bad frames rx-ed (invalid checksum)
-	scan_ch     chan<- Scan_2D // channel for reporting scan data
-	scan_idx    int            // current scan index
-	scan        *Scan_2D       // current scan data
+	Name       string      // user name for this device
+	PortName   string      // serial port name
+	PWMName    string      // pwm name
+	Ctrl       chan Ctrl   // control channel
+	Scan       chan Scan2D // scan data channel
+	RPM        float32     // measured rpm
+	Running    bool        // is the PID turned on?
+	GoodFrames uint        // good frames rx-ed
+	BadFrames  uint        // bad frames rx-ed (invalid checksum)
+
+	port     *serial.Port
+	pwm      *pwm.PWM
+	pid      *pid.PID
+	rpm_lock sync.Mutex  // lock for access to rpm
+	frame    LIDAR_frame // frame being read from serial
+	ofs      int         // offset into frame data
+	scan_idx int         // current scan index
+	scan     Scan2D      // current scan data
 }
 
 //-----------------------------------------------------------------------------
@@ -102,42 +106,42 @@ const PID_OMAX = 0.5
 // These are different goroutines, so we use locking.
 
 // set the motor rpm process value
-func (lidar *LIDAR) set_rpm_pv(rpm float32) {
-	lidar.rpm_lock.Lock()
-	lidar.rpm = rpm
-	lidar.rpm_lock.Unlock()
+func (l *LIDAR) set_rpm_pv(rpm float32) {
+	l.rpm_lock.Lock()
+	l.RPM = rpm
+	l.rpm_lock.Unlock()
 }
 
 // get the motor rpm process value
-func (lidar *LIDAR) get_rpm_pv() float32 {
-	lidar.rpm_lock.Lock()
-	rpm := lidar.rpm
-	lidar.rpm_lock.Unlock()
+func (l *LIDAR) get_rpm_pv() float32 {
+	l.rpm_lock.Lock()
+	rpm := l.RPM
+	l.rpm_lock.Unlock()
 	return rpm
 }
 
 // Update the PWM value using the PID
-func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("%s.motor_control() enter", lidar.Name)
+func (l *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("%s.motor_control() enter", l.Name)
 	defer wg.Done()
 	// perform pid/pwm updates at the LIDAR_MOTOR_PERIOD
 	tick := time.NewTicker(LIDAR_MOTOR_PERIOD * time.Millisecond)
 	for {
 		select {
 		case <-quit:
-			log.Printf("%s.motor_control() exit", lidar.Name)
+			log.Printf("%s.motor_control() exit", l.Name)
 			tick.Stop()
 			return
 		case <-tick.C:
-			rpm := lidar.get_rpm_pv()
+			rpm := l.get_rpm_pv()
 			// prevent motor burnout during pid tuning
 			if rpm > LIDAR_RPM_SHUTDOWN {
-				log.Printf("%s: max motor rpm exceeded %f > %f", lidar.Name, rpm, LIDAR_RPM_SHUTDOWN)
-				lidar.pwm.Set(0.0)
-				lidar.pid_on = false
+				log.Printf("%s: max motor rpm exceeded %f > %f", l.Name, rpm, LIDAR_RPM_SHUTDOWN)
+				l.pwm.Set(0.0)
+				l.Running = false
 			}
-			if lidar.pid_on {
-				lidar.pwm.Set(lidar.pid.Update(rpm))
+			if l.Running {
+				l.pwm.Set(l.pid.Update(rpm))
 			}
 		}
 	}
@@ -148,14 +152,12 @@ func (lidar *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
 
 const SAMPLES_PER_SCAN = 360
 
-func (lidar *LIDAR) alloc_scan() {
-	var scan Scan_2D
-	scan.Samples = make([]Sample_2D, SAMPLES_PER_SCAN)
-	lidar.scan_idx = 0
-	lidar.scan = &scan
+func (l *LIDAR) alloc_scan() {
+	l.scan_idx = 0
+	l.scan = make([]Sample2D, SAMPLES_PER_SCAN)
 }
 
-func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
+func (scan Scan2D) add_sample(f *LIDAR_frame, base, idx int) {
 	ofs := LIDAR_SAMPLE_OFS + (idx * LIDAR_SAMPLE_SIZE)
 	b0 := f.data[ofs]
 	b1 := f.data[ofs+1]
@@ -163,7 +165,7 @@ func (scan *Scan_2D) add_sample(f *LIDAR_frame, base, idx int) {
 	b3 := f.data[ofs+3]
 
 	idx += base
-	s := &scan.Samples[idx]
+	s := &scan[idx]
 	s.Good = (b1>>7)&1 == 0
 	s.Too_Close = (b1>>6)&1 != 0
 	s.Angle = util.DtoR(float32(idx))
@@ -242,87 +244,87 @@ func (frame *LIDAR_frame) angle() int {
 }
 
 // process a received lidar frame
-func (lidar *LIDAR) process_frame() {
-	f := &lidar.frame
+func (l *LIDAR) process_frame() {
+	f := &l.frame
 	// set rpm for the PID process value
-	lidar.set_rpm_pv(f.rpm())
+	l.set_rpm_pv(f.rpm())
 	// add the frame samples to the current scan
 	idx := f.angle()
-	if idx < lidar.scan_idx {
+	if idx < l.scan_idx {
 		// report the scan
-		log.Printf("%s: scan complete (%.1f rpm)", lidar.Name, f.rpm())
-		lidar.scan_ch <- *lidar.scan
+		log.Printf("%s: scan complete (%.1f rpm)", l.Name, f.rpm())
+		l.Scan <- l.scan
 		// alocate the next scan
-		lidar.alloc_scan()
+		l.alloc_scan()
 	}
 	// add the 4 samples
-	lidar.scan.add_sample(f, idx, 0)
-	lidar.scan.add_sample(f, idx, 1)
-	lidar.scan.add_sample(f, idx, 2)
-	lidar.scan.add_sample(f, idx, 3)
-	lidar.scan_idx = idx + 4
+	l.scan.add_sample(f, idx, 0)
+	l.scan.add_sample(f, idx, 1)
+	l.scan.add_sample(f, idx, 2)
+	l.scan.add_sample(f, idx, 3)
+	l.scan_idx = idx + 4
 }
 
 // receive a lidar frame from a buffer
-func (lidar *LIDAR) rx_frame(buf []byte, ts time.Time) {
+func (l *LIDAR) rx_frame(buf []byte, ts time.Time) {
 	// We look for a start of frame and a valid index to mark a frame.
 	// We may get some false positives, but they will be weeded out with bad checksums.
 	// Once we sync with the frame cadence we should be good.
-	f := &lidar.frame
+	f := &l.frame
 	for _, c := range buf {
-		f.data[lidar.ofs] = c
-		if lidar.ofs == LIDAR_START_OFS {
+		f.data[l.ofs] = c
+		if l.ofs == LIDAR_START_OFS {
 			// looking for start of frame
 			if c == LIDAR_SOF_DELIMITER {
 				// ok - set the timestamp
 				f.ts = ts
 				// now read the index
-				lidar.ofs += 1
+				l.ofs += 1
 			}
-		} else if lidar.ofs == LIDAR_INDEX_OFS {
+		} else if l.ofs == LIDAR_INDEX_OFS {
 			// looking for a valid index
 			if c >= LIDAR_MIN_INDEX && c <= LIDAR_MAX_INDEX {
 				// ok - now read the frame body
-				lidar.ofs += 1
+				l.ofs += 1
 			} else {
 				// not a frame - keep looking
-				lidar.ofs = LIDAR_START_OFS
+				l.ofs = LIDAR_START_OFS
 			}
-		} else if lidar.ofs == LIDAR_END_OFS {
+		} else if l.ofs == LIDAR_END_OFS {
 			// validate checksum
 			calc_cs := f.checksum()
 			frame_cs := f.get_uint16(LIDAR_CHECKSUM_OFS)
 			if calc_cs == frame_cs {
 				// good frame - process it
-				lidar.good_frames += 1
-				lidar.process_frame()
+				l.GoodFrames += 1
+				l.process_frame()
 			} else {
 				// bad frame
-				lidar.bad_frames += 1
+				l.BadFrames += 1
 			}
 			// reset for the next frame
-			lidar.ofs = LIDAR_START_OFS
+			l.ofs = LIDAR_START_OFS
 		} else {
 			// reading the frame body
-			lidar.ofs += 1
+			l.ofs += 1
 		}
 	}
 }
 
 // Read the serial port and process the frames
-func (lidar *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
-	log.Printf("%s.read_serial() enter", lidar.Name)
+func (l *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("%s.read_serial() enter", l.Name)
 	defer wg.Done()
 	for {
 		select {
 		case <-quit:
-			log.Printf("%s.read_serial() exit", lidar.Name)
+			log.Printf("%s.read_serial() exit", l.Name)
 			return
 		default:
 			buf := make([]byte, 1024)
-			n, err := lidar.port.Read(buf)
+			n, err := l.port.Read(buf)
 			if err == nil {
-				lidar.rx_frame(buf[:n], time.Now())
+				l.rx_frame(buf[:n], time.Now())
 				// Wait a while - there's a tradeoff here between data latency and cpu usage.
 				// A smaller wait time gives lower latency and more cpu consumption.
 				// 300 rpm = 200 ms/rev, so 50 ms is 1/4 revolution
@@ -334,63 +336,21 @@ func (lidar *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
 
 //-----------------------------------------------------------------------------
 
-func Open(name, port_name, pwm_name string) (*LIDAR, error) {
-	var lidar LIDAR
-	lidar.Name = name
+func (l *LIDAR) close() error {
+	log.Printf("%s.Close()", l.Name)
 
-	log.Printf("%s.Open() serial=%s pwm=%s", lidar.Name, port_name, pwm_name)
+	l.pwm.Set(0.0)
+	l.pwm.Close()
+	err := l.port.Flush()
 
-	// open the serial port
-	cfg := &serial.Config{Name: port_name, Baud: 115200, ReadTimeout: 500 * time.Millisecond}
-	port, err := serial.OpenPort(cfg)
 	if err != nil {
-		log.Printf("%s: unable to open serial port %s", lidar.Name, port_name)
-		return nil, err
-	}
-	lidar.port = port
-
-	// open the pwm channel
-	pwm, err := pwm.Open(fmt.Sprintf("%s_pwm", lidar.Name), pwm_name, 0.0)
-	if err != nil {
-		log.Printf("%s: unable to open pwm channel", lidar.Name)
-		return nil, err
-	}
-	lidar.pwm = pwm
-
-	// Initialise the PID
-	pid, err := pid.Init(PID_PERIOD, PID_KP, PID_KI, PID_KD, PID_IMIN, PID_IMAX, PID_OMIN, PID_OMAX)
-	if err != nil {
-		log.Printf("%s: unable to setup pid", lidar.Name)
-		return nil, err
-	}
-	pid.Set(LIDAR_RPM)
-	lidar.pid = pid
-	lidar.pid_on = true
-
-	// allocate the initial scan
-	lidar.alloc_scan()
-
-	return &lidar, nil
-}
-
-//-----------------------------------------------------------------------------
-
-func (lidar *LIDAR) Close() error {
-	log.Printf("%s.Close()", lidar.Name)
-	log.Printf("%s: good/bad %d/%d", lidar.Name, lidar.good_frames, lidar.bad_frames)
-
-	lidar.pwm.Set(0.0)
-	lidar.pwm.Close()
-
-	err := lidar.port.Flush()
-	if err != nil {
-		log.Printf("%s: error flushing serial port", lidar.Name)
+		log.Printf("%s: error flushing serial port", l.Name)
 		return err
 	}
 
-	err = lidar.port.Close()
+	err = l.port.Close()
 	if err != nil {
-		log.Printf("%s: error closing serial port", lidar.Name)
+		log.Printf("%s: error closing serial port", l.Name)
 		return err
 	}
 
@@ -399,28 +359,83 @@ func (lidar *LIDAR) Close() error {
 
 //-----------------------------------------------------------------------------
 
-func (lidar *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup, scan_ch chan<- Scan_2D) {
-	log.Printf("%s.Process() enter", lidar.Name)
-	defer wg.Done()
+func NewLIDAR(name, port_name, pwm_name string) (*LIDAR, error) {
 
-	// record the channel to report scans on
-	lidar.scan_ch = scan_ch
+	l := LIDAR{}
+	l.Name = name
+	l.PortName = port_name
+	l.PWMName = pwm_name
+
+	log.Printf("NewLidar() name %s serial %s pwm %s", l.Name, l.PortName, l.PWMName)
+
+	// open the serial port
+	cfg := &serial.Config{Name: l.PortName, Baud: 115200, ReadTimeout: 500 * time.Millisecond}
+	port, err := serial.OpenPort(cfg)
+	if err != nil {
+		log.Printf("%s: unable to open serial port %s", l.Name, l.PortName)
+		return nil, err
+	}
+	l.port = port
+
+	// open the pwm channel
+	pwm, err := pwm.Open(fmt.Sprintf("%s_pwm", l.Name), l.PWMName, 0.0)
+	if err != nil {
+		log.Printf("%s: unable to open pwm channel", l.Name)
+		return nil, err
+	}
+	l.pwm = pwm
+
+	// Initialise the PID
+	pid, err := pid.Init(PID_PERIOD, PID_KP, PID_KI, PID_KD, PID_IMIN, PID_IMAX, PID_OMIN, PID_OMAX)
+	if err != nil {
+		log.Printf("%s: unable to setup pid", l.Name)
+		return nil, err
+	}
+	pid.Set(0.0)
+	l.pid = pid
+	l.Running = false
+
+	// allocate the initial scan
+	l.alloc_scan()
+
+	// setup lidar channels
+	l.Ctrl = make(chan Ctrl)
+	l.Scan = make(chan Scan2D)
+
+	return &l, nil
+}
+
+//-----------------------------------------------------------------------------
+
+func (l *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
+	log.Printf("%s.Process() enter", l.Name)
+	defer wg.Done()
 
 	lidar_wg := &sync.WaitGroup{}
 
 	// start motor control
 	lidar_wg.Add(1)
-	go lidar.motor_control(quit, lidar_wg)
+	go l.motor_control(quit, lidar_wg)
 
 	// start serial port reading
 	lidar_wg.Add(1)
-	go lidar.read_serial(quit, lidar_wg)
+	go l.read_serial(quit, lidar_wg)
 
 	for {
 		select {
+		case ctrl := <-l.Ctrl:
+			switch ctrl {
+			case Start:
+				log.Printf("%s.Process() start", l.Name)
+			case Stop:
+				log.Printf("%s.Process() stop", l.Name)
+			default:
+				log.Printf("%s.Process() unknown ctrl %d", l.Name, ctrl)
+			}
 		case <-quit:
 			lidar_wg.Wait()
-			log.Printf("%s.Process() exit", lidar.Name)
+			l.close()
+			log.Printf("%s.Process() exit", l.Name)
 			return
 		}
 	}

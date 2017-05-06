@@ -11,7 +11,7 @@ package lidar
 //-----------------------------------------------------------------------------
 
 // 2D LIDAR Sample
-type Sample_2D struct {
+type Sample2D struct {
 	Good            bool    // good data in this sample
 	Too_Close       bool    // object too close
 	Angle           float32 // angle in radians
@@ -20,8 +20,14 @@ type Sample_2D struct {
 }
 
 // 2D LIDAR Scan
-type Scan_2D struct {
-	Samples []Sample_2D
-}
+type Scan2D []Sample2D
+
+// Control Values
+type Ctrl int
+
+const (
+	Stop  Ctrl = iota // stop scanning
+	Start             // start scanning
+)
 
 //-----------------------------------------------------------------------------

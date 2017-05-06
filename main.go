@@ -6,11 +6,12 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"sync"
 
-	cli "github.com/deadsy/go-cli"
-	//"github.com/deadsy/slamx/lidar"
-	//"github.com/deadsy/slamx/view"
+	"github.com/deadsy/go-cli"
+	"github.com/deadsy/slamx/lidar"
 )
 
 //-----------------------------------------------------------------------------
@@ -43,21 +44,33 @@ var cmd_exit = cli.Leaf{
 var lidar_start = cli.Leaf{
 	Descr: "start lidar scanning",
 	F: func(c *cli.CLI, args []string) {
-		c.Put("TODO")
+		app := c.User.(*slam)
+		app.lidar.Ctrl <- lidar.Start
 	},
 }
 
 var lidar_status = cli.Leaf{
 	Descr: "show lidar status",
 	F: func(c *cli.CLI, args []string) {
-		c.Put("TODO")
+		app := c.User.(*slam)
+		l := app.lidar
+		rows := make([][]string, 0, 10)
+		rows = append(rows, []string{"name", l.Name})
+		rows = append(rows, []string{"port name", l.PortName})
+		rows = append(rows, []string{"pwm name", l.PWMName})
+		rows = append(rows, []string{"running", fmt.Sprintf("%t", l.Running)})
+		rows = append(rows, []string{"rpm", fmt.Sprintf("%f", l.RPM)})
+		rows = append(rows, []string{"good frames", fmt.Sprintf("%d", l.GoodFrames)})
+		rows = append(rows, []string{"bad frames", fmt.Sprintf("%d", l.BadFrames)})
+		c.Put(cli.TableString(rows, []int{10, 10}, 1) + "\n")
 	},
 }
 
 var lidar_stop = cli.Leaf{
 	Descr: "stop lidar scanning",
 	F: func(c *cli.CLI, args []string) {
-		c.Put("TODO")
+		app := c.User.(*slam)
+		app.lidar.Ctrl <- lidar.Stop
 	},
 }
 
@@ -80,15 +93,16 @@ var menu_root = cli.Menu{
 
 //-----------------------------------------------------------------------------
 
-type user_app struct {
+type slam struct {
+	lidar *lidar.LIDAR
 }
 
-func NewUserApp() *user_app {
-	app := user_app{}
+func NewSlam() *slam {
+	app := slam{}
 	return &app
 }
 
-func (user *user_app) Put(s string) {
+func (app *slam) Put(s string) {
 	fmt.Printf("%s", s)
 }
 
@@ -96,15 +110,53 @@ func (user *user_app) Put(s string) {
 
 func main() {
 
+	// open the logfile
+	logfile, err := os.OpenFile("slamx.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
+	if err != nil {
+		fmt.Printf("error opening log file: %v", err)
+		os.Exit(1)
+	}
+	log.SetOutput(logfile)
+
+	// setup the user application object
+	app := NewSlam()
+
+	// setup the LIDAR
+	l, err := lidar.NewLIDAR("lidar0", lidar_serial, lidar_pwm)
+	if err != nil {
+		log.Fatal("unable to open lidar device")
+	}
+	app.lidar = l
+
+	// global quit channel for all goroutines
+	quit := make(chan bool)
+	// wait group to wait for child goroutine completion
+	wg := &sync.WaitGroup{}
+
+	// Start the LIDAR goroutine
+	wg.Add(1)
+	go app.lidar.Process(quit, wg)
+
 	hpath := "history.txt"
-	c := cli.NewCLI(NewUserApp())
+	c := cli.NewCLI(app)
 	c.HistoryLoad(hpath)
 	c.SetRoot(menu_root)
 	c.SetPrompt("slamx> ")
 	for c.Running() {
-		c.Run()
+		select {
+		case scan := <-app.lidar.Scan:
+			_ = scan
+		default:
+			c.Run()
+		}
 	}
 	c.HistorySave(hpath)
+
+	// stop all go routines
+	close(quit)
+	wg.Wait()
+
+	logfile.Close()
 	os.Exit(0)
 }
 
