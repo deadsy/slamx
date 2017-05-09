@@ -80,20 +80,20 @@ func Open(name, pin string, val float32) (*PWM, error) {
 // Close the PWM channel
 func (p *PWM) Close() {
 	log.Printf("%s.Close()", p.Name)
-	p.write(fmt.Sprintf("release %s", p.pin))
+	p.write(fmt.Sprintf("release %s\n", p.pin))
 	p.dev.Close()
 }
 
 // Set the PWM value
 func (p *PWM) Set(val float32) {
-	//log.Printf("%s.Set() = %f", p.Name, val)
+	//log.Printf("%s.Set() %f", p.Name, val)
 	val = normalise(val)
-	if val == p.val {
+	if val != 0.0 && val == p.val {
 		// no change
 		return
 	}
 	p.val = val
-	p.write(fmt.Sprintf("%s=%.3f", p.pin, p.val))
+	p.write(fmt.Sprintf("%s=%.3f\n", p.pin, p.val))
 }
 
 //-----------------------------------------------------------------------------

@@ -97,7 +97,7 @@ var pwm_on = cli.Leaf{
 	Descr: "turn pwm on",
 	F: func(c *cli.CLI, args []string) {
 		app := c.User.(*slam)
-		app.pwm.Set(0.5)
+		app.pwm.Set(0.4)
 	},
 }
 
