@@ -33,24 +33,24 @@ func clamp(x float32) float32 {
 
 // Open the PWM channel
 func Open(name, pin string, val float32) (*PWM, error) {
-	var pwm PWM
-	pwm.Name = name
-	log.Printf("%s.Open() pin=%s\n", pwm.Name, pin)
-	pwm.pin = pin
-	pwm.Set(val)
-	return &pwm, nil
+	var p PWM
+	p.Name = name
+	log.Printf("%s.Open() pin=%s\n", p.Name, pin)
+	p.pin = pin
+	p.Set(val)
+	return &p, nil
 }
 
 // Close the PWM channel
-func (pwm *PWM) Close() {
-	log.Printf("%s.Close()\n", pwm.Name)
+func (p *PWM) Close() {
+	log.Printf("%s.Close()\n", p.Name)
 	// TODO ...
 }
 
 // Set the PWM value
-func (pwm *PWM) Set(val float32) {
-	//log.Printf("pwm.Set() = %f\n", pwm.Val)
-	pwm.val = clamp(val)
+func (p *PWM) Set(val float32) {
+	log.Printf("pwm.Set() = %f\n", val)
+	p.val = clamp(val)
 	// TODO ....
 }
 

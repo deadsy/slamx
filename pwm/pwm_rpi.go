@@ -50,10 +50,10 @@ func normalise(val float32) float32 {
 //-----------------------------------------------------------------------------
 
 // Write to the PWM device
-func (pwm *PWM) write(msg string) error {
-	_, err := pwm.dev.WriteString(msg)
+func (p *PWM) write(msg string) error {
+	_, err := p.dev.WriteString(msg)
 	if err != nil {
-		log.Printf("%s: can't write to pwm device", pwm.Name)
+		log.Printf("%s: can't write to pwm device", p.Name)
 		return err
 	}
 	return nil
@@ -63,37 +63,37 @@ func (pwm *PWM) write(msg string) error {
 
 // Open the PWM channel
 func Open(name, pin string, val float32) (*PWM, error) {
-	var pwm PWM
-	pwm.Name = name
-	log.Printf("%s.Open() pin=%s", pwm.Name, pin)
-	pwm.pin = pin
+	var p PWM
+	p.Name = name
+	log.Printf("%s.Open() pin=%s", p.Name, pin)
+	p.pin = pin
 	f, err := os.OpenFile("/dev/pi-blaster", os.O_WRONLY, 0660)
 	if err != nil {
-		log.Printf("%s: can't open pwm device", pwm.Name)
+		log.Printf("%s: can't open pwm device", p.Name)
 		return nil, err
 	}
-	pwm.dev = f
-	pwm.Set(val)
-	return &pwm, nil
+	p.dev = f
+	p.Set(val)
+	return &p, nil
 }
 
 // Close the PWM channel
-func (pwm *PWM) Close() {
-	log.Printf("%s.Close()", pwm.Name)
-	pwm.write(fmt.Sprintf("release %s", pwm.pin))
-	pwm.dev.Close()
+func (p *PWM) Close() {
+	log.Printf("%s.Close()", p.Name)
+	p.write(fmt.Sprintf("release %s", p.pin))
+	p.dev.Close()
 }
 
 // Set the PWM value
-func (pwm *PWM) Set(val float32) {
-	//log.Printf("%s.Set() = %f", pwm.Name, val)
+func (p *PWM) Set(val float32) {
+	//log.Printf("%s.Set() = %f", p.Name, val)
 	val = normalise(val)
-	if val == pwm.val {
+	if val == p.val {
 		// no change
 		return
 	}
-	pwm.val = val
-	pwm.write(fmt.Sprintf("%s=%.3f", pwm.pin, pwm.val))
+	p.val = val
+	p.write(fmt.Sprintf("%s=%.3f", p.pin, p.val))
 }
 
 //-----------------------------------------------------------------------------

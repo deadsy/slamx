@@ -12,6 +12,7 @@ import (
 
 	"github.com/deadsy/go-cli"
 	"github.com/deadsy/slamx/lidar"
+	"github.com/deadsy/slamx/pwm"
 )
 
 //-----------------------------------------------------------------------------
@@ -82,6 +83,31 @@ var lidar_menu = cli.Menu{
 }
 
 //-----------------------------------------------------------------------------
+// PWM testing
+
+var pwm_off = cli.Leaf{
+	Descr: "turn pwm off",
+	F: func(c *cli.CLI, args []string) {
+		app := c.User.(*slam)
+		app.pwm.Set(0.0)
+	},
+}
+
+var pwm_on = cli.Leaf{
+	Descr: "turn pwm on",
+	F: func(c *cli.CLI, args []string) {
+		app := c.User.(*slam)
+		app.pwm.Set(0.5)
+	},
+}
+
+// pwm submenu items
+var pwm_menu = cli.Menu{
+	{"off", pwm_off},
+	{"on", pwm_on},
+}
+
+//-----------------------------------------------------------------------------
 
 // root menu
 var menu_root = cli.Menu{
@@ -89,12 +115,14 @@ var menu_root = cli.Menu{
 	{"help", cmd_help},
 	{"history", cmd_history, cli.HistoryHelp},
 	{"lidar", lidar_menu, "lidar functions"},
+	{"pwm", pwm_menu, "pwm functions"},
 }
 
 //-----------------------------------------------------------------------------
 
 type slam struct {
 	lidar *lidar.LIDAR
+	pwm   *pwm.PWM
 }
 
 func NewSlam() *slam {
@@ -108,7 +136,7 @@ func (app *slam) Put(s string) {
 
 //-----------------------------------------------------------------------------
 
-func main() {
+func mainx() {
 
 	// open the logfile
 	logfile, err := os.OpenFile("slamx.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
@@ -162,55 +190,38 @@ func main() {
 
 //-----------------------------------------------------------------------------
 
-/*
-
 func main() {
 
-	view0, err := view.Open("view0")
+	// open the logfile
+	logfile, err := os.OpenFile("slamx.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
 	if err != nil {
-		log.Fatal("unable to open view window")
+		fmt.Printf("error opening log file: %v", err)
+		os.Exit(1)
 	}
+	log.SetOutput(logfile)
 
-	lidar0, err := lidar.Open("lidar0", lidar_serial, lidar_pwm)
+	// setup the user application object
+	app := NewSlam()
+
+	// setup the PWM
+	p, err := pwm.Open("pwm", "21", 0)
 	if err != nil {
-		log.Fatal("unable to open lidar device")
+		log.Fatal("unable to open pwm channel")
 	}
+	app.pwm = p
 
-	quit := make(chan bool)
-	wg := &sync.WaitGroup{}
-
-	// start the LIDAR process
-	wg.Add(1)
-	scan_ch := make(chan lidar.Scan_2D)
-	go lidar0.Process(quit, wg, scan_ch)
-
-	angle := float32(0)
-
-	// run the event loop
-	running := true
-	for running {
-		select {
-		case scan := <-scan_ch:
-			log.Printf("rxed %d", len(scan.Samples))
-			//view0.Render(&scan)
-			view0.Render2(angle)
-			angle += 1
-		default:
-			running = view0.Events()
-			view0.Delay(30)
-		}
+	hpath := "history.txt"
+	c := cli.NewCLI(app)
+	c.HistoryLoad(hpath)
+	c.SetRoot(menu_root)
+	c.SetPrompt("slamx> ")
+	for c.Running() {
+		c.Run()
 	}
+	c.HistorySave(hpath)
 
-	// stop all go routines
-	close(quit)
-	wg.Wait()
-
-	lidar0.Close()
-	view0.Close()
-
+	logfile.Close()
 	os.Exit(0)
 }
-
-*/
 
 //-----------------------------------------------------------------------------
