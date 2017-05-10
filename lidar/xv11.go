@@ -23,6 +23,7 @@ Motor Speed:
 300 rpm is a good target speed giving a 5 Hz 360 degree scan.
 Experimentally 3.11V @ 100% gives about 300 rpm.
 Other voltages/duty cycles can be guessed at from that.
+The motor spins counter-clockwise as viewed from above.
 
 Compatability:
 This driver has been tested against a v2.6 unit.
