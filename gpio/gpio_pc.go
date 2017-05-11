@@ -34,20 +34,21 @@ type GPIO struct {
 
 func NewGPIO(name string) (*GPIO, error) {
 	g := GPIO{
-    Name: name,
-  }
+		Name: name,
+	}
 	log.Printf("NewGPIO() %s", g.Name)
-  return &g, nil
+	return &g, nil
 }
 
 func (g *GPIO) Close() {
+	log.Printf("%s.Close() %s", g.Name)
 }
 
 //-----------------------------------------------------------------------------
 
 type Output struct {
 	Name string
-  gpio *GPIO
+	gpio *GPIO
 	pin  string
 }
 
@@ -55,7 +56,7 @@ type Output struct {
 func (g *GPIO) NewOutput(pin string, val int) (*Output, error) {
 	p := Output{
 		Name: fmt.Sprintf("%s_out_%s", g.Name, pin),
-    gpio: g,
+		gpio: g,
 		pin:  pin,
 	}
 	log.Printf("NewOutput() %s", p.Name)
@@ -86,7 +87,7 @@ func (p *Output) Close() {
 
 type PWM struct {
 	Name string
-  gpio *GPIO
+	gpio *GPIO
 	pin  string
 	val  float32
 }
@@ -95,7 +96,7 @@ type PWM struct {
 func (g *GPIO) NewPWM(pin string, val float32) (*PWM, error) {
 	p := PWM{
 		Name: fmt.Sprintf("%s_pwm_%s", g.Name, pin),
-    gpio: g,
+		gpio: g,
 		pin:  pin,
 	}
 	log.Printf("NewPWM() %s", p.Name)
