@@ -11,8 +11,9 @@ import (
 	"sync"
 
 	"github.com/deadsy/go-cli"
+	"github.com/deadsy/slamx/gpio"
 	"github.com/deadsy/slamx/lidar"
-	"github.com/deadsy/slamx/pwm"
+	"github.com/deadsy/slamx/motor"
 )
 
 //-----------------------------------------------------------------------------
@@ -57,8 +58,8 @@ var lidar_status = cli.Leaf{
 		l := app.lidar
 		rows := make([][]string, 0, 10)
 		rows = append(rows, []string{"name", l.Name})
-		rows = append(rows, []string{"port name", l.PortName})
-		rows = append(rows, []string{"pwm name", l.PWMName})
+		rows = append(rows, []string{"serial port", l.PortName})
+		rows = append(rows, []string{"motor", l.Motor.Name})
 		rows = append(rows, []string{"running", fmt.Sprintf("%t", l.Running)})
 		rows = append(rows, []string{"rpm", fmt.Sprintf("%f", l.RPM)})
 		rows = append(rows, []string{"good frames", fmt.Sprintf("%d", l.GoodFrames)})
@@ -89,7 +90,7 @@ var pwm_off = cli.Leaf{
 	Descr: "turn pwm off",
 	F: func(c *cli.CLI, args []string) {
 		app := c.User.(*slam)
-		app.pwm.Set(0.0)
+		app.motor.Set(0.0)
 	},
 }
 
@@ -97,7 +98,7 @@ var pwm_on = cli.Leaf{
 	Descr: "turn pwm on",
 	F: func(c *cli.CLI, args []string) {
 		app := c.User.(*slam)
-		app.pwm.Set(0.4)
+		app.motor.Set(0.4)
 	},
 }
 
@@ -122,7 +123,7 @@ var menu_root = cli.Menu{
 
 type slam struct {
 	lidar *lidar.LIDAR
-	pwm   *pwm.PWM
+	motor *motor.Motor
 }
 
 func NewSlam() *slam {
@@ -136,7 +137,7 @@ func (app *slam) Put(s string) {
 
 //-----------------------------------------------------------------------------
 
-func mainx() {
+func main() {
 
 	// open the logfile
 	logfile, err := os.OpenFile("slamx.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
@@ -149,12 +150,41 @@ func mainx() {
 	// setup the user application object
 	app := NewSlam()
 
-	// setup the LIDAR
-	l, err := lidar.NewLIDAR("lidar0", lidar_serial, lidar_pwm)
+	// gpio subsystem
+	gpio, err := gpio.NewGPIO("gpio0")
+	if err != nil {
+		log.Fatal("unable to create gpio device")
+	}
+	defer gpio.Close()
+
+	// pwm output for motor control
+	pwm, err := gpio.NewPWM(xv11_pwm, 0)
+	if err != nil {
+		log.Fatal("unable to create pwm output")
+	}
+	defer pwm.Close()
+
+	// standby (on/off) control for motor driver
+	stby, err := gpio.NewOutput(xv11_stby, 0)
+	if err != nil {
+		log.Fatal("unable to create gpio output")
+	}
+	defer stby.Close()
+
+	// setup the driver for the lidar motor
+	motor, err := motor.NewMotor("motor0", pwm, stby)
+	if err != nil {
+		log.Fatal("unable to create motor control")
+	}
+	defer motor.Close()
+
+	// setup the xv11 lidar
+	lidar, err := lidar.NewLIDAR("lidar0", xv11_serial, motor)
 	if err != nil {
 		log.Fatal("unable to open lidar device")
 	}
-	app.lidar = l
+	defer lidar.Close()
+	app.lidar = lidar
 
 	// global quit channel for all goroutines
 	quit := make(chan bool)
@@ -183,42 +213,6 @@ func mainx() {
 	// stop all go routines
 	close(quit)
 	wg.Wait()
-
-	logfile.Close()
-	os.Exit(0)
-}
-
-//-----------------------------------------------------------------------------
-
-func main() {
-
-	// open the logfile
-	logfile, err := os.OpenFile("slamx.log", os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0666)
-	if err != nil {
-		fmt.Printf("error opening log file: %v", err)
-		os.Exit(1)
-	}
-	log.SetOutput(logfile)
-
-	// setup the user application object
-	app := NewSlam()
-
-	// setup the PWM
-	p, err := pwm.Open("pwm", "21", 0)
-	if err != nil {
-		log.Fatal("unable to open pwm channel")
-	}
-	app.pwm = p
-
-	hpath := "history.txt"
-	c := cli.NewCLI(app)
-	c.HistoryLoad(hpath)
-	c.SetRoot(menu_root)
-	c.SetPrompt("slamx> ")
-	for c.Running() {
-		c.Run()
-	}
-	c.HistorySave(hpath)
 
 	logfile.Close()
 	os.Exit(0)

@@ -52,13 +52,12 @@ https://xv11hacking.wikispaces.com/LIDAR+Sensor
 package lidar
 
 import (
-	"fmt"
 	"log"
 	"sync"
 	"time"
 
+	"github.com/deadsy/slamx/motor"
 	"github.com/deadsy/slamx/pid"
-	"github.com/deadsy/slamx/pwm"
 	"github.com/deadsy/slamx/util"
 	"github.com/tarm/serial"
 )
@@ -66,18 +65,17 @@ import (
 //-----------------------------------------------------------------------------
 
 type LIDAR struct {
-	Name       string      // user name for this device
-	PortName   string      // serial port name
-	PWMName    string      // pwm name
-	Ctrl       chan Ctrl   // control channel
-	Scan       chan Scan2D // scan data channel
-	RPM        float32     // measured rpm
-	Running    bool        // is the PID turned on?
-	GoodFrames uint        // good frames rx-ed
-	BadFrames  uint        // bad frames rx-ed (invalid checksum)
+	Name       string       // user name for this device
+	PortName   string       // serial port name
+	Motor      *motor.Motor // motor driver
+	Ctrl       chan Ctrl    // control channel
+	Scan       chan Scan2D  // scan data channel
+	RPM        float32      // measured rpm
+	Running    bool         // is the PID turned on?
+	GoodFrames uint         // good frames rx-ed
+	BadFrames  uint         // bad frames rx-ed (invalid checksum)
 
 	port     *serial.Port
-	pwm      *pwm.PWM
 	pid      *pid.PID
 	rpm_lock sync.Mutex  // lock for access to rpm
 	frame    LIDAR_frame // frame being read from serial
@@ -138,11 +136,11 @@ func (l *LIDAR) motor_control(quit <-chan bool, wg *sync.WaitGroup) {
 			// prevent motor burnout during pid tuning
 			if rpm > LIDAR_RPM_SHUTDOWN {
 				log.Printf("%s: max motor rpm exceeded %f > %f", l.Name, rpm, LIDAR_RPM_SHUTDOWN)
-				l.pwm.Set(0.0)
+				l.Motor.Set(0.0)
 				l.Running = false
 			}
 			if l.Running {
-				l.pwm.Set(l.pid.Update(rpm))
+				l.Motor.Set(l.pid.Update(rpm))
 			}
 		}
 	}
@@ -337,37 +335,14 @@ func (l *LIDAR) read_serial(quit <-chan bool, wg *sync.WaitGroup) {
 
 //-----------------------------------------------------------------------------
 
-func (l *LIDAR) close() error {
-	log.Printf("%s.Close()", l.Name)
+func NewLIDAR(name, port_name string, motor *motor.Motor) (*LIDAR, error) {
 
-	l.pwm.Set(0.0)
-	l.pwm.Close()
-	err := l.port.Flush()
-
-	if err != nil {
-		log.Printf("%s: error flushing serial port", l.Name)
-		return err
+	l := LIDAR{
+		Name:     name,
+		PortName: port_name,
+		Motor:    motor,
 	}
-
-	err = l.port.Close()
-	if err != nil {
-		log.Printf("%s: error closing serial port", l.Name)
-		return err
-	}
-
-	return nil
-}
-
-//-----------------------------------------------------------------------------
-
-func NewLIDAR(name, port_name, pwm_name string) (*LIDAR, error) {
-
-	l := LIDAR{}
-	l.Name = name
-	l.PortName = port_name
-	l.PWMName = pwm_name
-
-	log.Printf("NewLidar() name %s serial %s pwm %s", l.Name, l.PortName, l.PWMName)
+	log.Printf("NewLidar() %s", l.Name)
 
 	// open the serial port
 	cfg := &serial.Config{Name: l.PortName, Baud: 115200, ReadTimeout: 500 * time.Millisecond}
@@ -377,14 +352,6 @@ func NewLIDAR(name, port_name, pwm_name string) (*LIDAR, error) {
 		return nil, err
 	}
 	l.port = port
-
-	// open the pwm channel
-	pwm, err := pwm.Open(fmt.Sprintf("%s_pwm", l.Name), l.PWMName, 0.0)
-	if err != nil {
-		log.Printf("%s: unable to open pwm channel", l.Name)
-		return nil, err
-	}
-	l.pwm = pwm
 
 	// Initialise the PID
 	pid, err := pid.Init(PID_PERIOD, PID_KP, PID_KI, PID_KD, PID_IMIN, PID_IMAX, PID_OMIN, PID_OMAX)
@@ -404,6 +371,26 @@ func NewLIDAR(name, port_name, pwm_name string) (*LIDAR, error) {
 	l.Scan = make(chan Scan2D)
 
 	return &l, nil
+}
+
+func (l *LIDAR) Close() error {
+	log.Printf("%s.Close()", l.Name)
+
+	l.Motor.Set(0.0)
+	err := l.port.Flush()
+
+	if err != nil {
+		log.Printf("%s: error flushing serial port", l.Name)
+		return err
+	}
+
+	err = l.port.Close()
+	if err != nil {
+		log.Printf("%s: error closing serial port", l.Name)
+		return err
+	}
+
+	return nil
 }
 
 //-----------------------------------------------------------------------------
@@ -435,7 +422,7 @@ func (l *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
 			}
 		case <-quit:
 			lidar_wg.Wait()
-			l.close()
+			l.Close()
 			log.Printf("%s.Process() exit", l.Name)
 			return
 		}

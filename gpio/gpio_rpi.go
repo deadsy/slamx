@@ -3,7 +3,7 @@
 //-----------------------------------------------------------------------------
 /*
 
-Raspberry Pi PWM Control
+Raspberry Pi GPIO Control
 
 Using the pi-blaster service.
 See- https://github.com/sarfata/pi-blaster
@@ -11,7 +11,7 @@ See- https://github.com/sarfata/pi-blaster
 */
 //-----------------------------------------------------------------------------
 
-package pwm
+package gpio
 
 import (
 	"fmt"
