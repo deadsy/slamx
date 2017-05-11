@@ -146,6 +146,7 @@ func main() {
 		os.Exit(1)
 	}
 	log.SetOutput(logfile)
+	defer logfile.Close()
 
 	// setup the user application object
 	app := NewSlam()
@@ -214,7 +215,6 @@ func main() {
 	close(quit)
 	wg.Wait()
 
-	logfile.Close()
 	os.Exit(0)
 }
 
