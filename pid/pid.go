@@ -79,9 +79,17 @@ func (pid *PID) Update(pv float32) float32 {
 
 //-----------------------------------------------------------------------------
 
-// Set the process setpoint
-func (pid *PID) Set(sp float32) {
-	pid.sp = sp
+// Set the PID setpoint value.
+func (p *PID) Set(sp float32) {
+	p.sp = sp
+}
+
+// Reset the PID state variables.
+func (p *PID) Reset() {
+	p.sp = 0
+	p.ev_prev = 0
+	p.i_term = 0
+	p.d_flag = false
 }
 
 //-----------------------------------------------------------------------------

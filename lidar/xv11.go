@@ -341,6 +341,7 @@ func NewLIDAR(name, port_name string, motor *motor.Motor) (*LIDAR, error) {
 		Name:     name,
 		PortName: port_name,
 		Motor:    motor,
+		Running:  false,
 	}
 	log.Printf("NewLidar() %s", l.Name)
 
@@ -359,9 +360,7 @@ func NewLIDAR(name, port_name string, motor *motor.Motor) (*LIDAR, error) {
 		log.Printf("%s: unable to setup pid", l.Name)
 		return nil, err
 	}
-	pid.Set(0.0)
 	l.pid = pid
-	l.Running = false
 
 	// allocate the initial scan
 	l.alloc_scan()
@@ -376,9 +375,9 @@ func NewLIDAR(name, port_name string, motor *motor.Motor) (*LIDAR, error) {
 func (l *LIDAR) Close() error {
 	log.Printf("%s.Close()", l.Name)
 
-	l.Motor.Set(0.0)
-	err := l.port.Flush()
+	l.Stop()
 
+	err := l.port.Flush()
 	if err != nil {
 		log.Printf("%s: error flushing serial port", l.Name)
 		return err
@@ -391,6 +390,27 @@ func (l *LIDAR) Close() error {
 	}
 
 	return nil
+}
+
+func (l *LIDAR) Start() {
+	if !l.Running {
+		log.Printf("%s.Start()", l.Name)
+		l.pid.Set(LIDAR_RPM)
+		l.Running = true
+	} else {
+		log.Printf("%s.Start() already running", l.Name)
+	}
+}
+
+func (l *LIDAR) Stop() {
+	if l.Running {
+		log.Printf("%s.Stop()", l.Name)
+		l.Running = false
+		l.pid.Reset()
+		l.Motor.Set(0)
+	} else {
+		log.Printf("%s.Stop() already stopped", l.Name)
+	}
 }
 
 //-----------------------------------------------------------------------------
@@ -414,9 +434,9 @@ func (l *LIDAR) Process(quit <-chan bool, wg *sync.WaitGroup) {
 		case ctrl := <-l.Ctrl:
 			switch ctrl {
 			case Start:
-				log.Printf("%s.Process() start", l.Name)
+				l.Start()
 			case Stop:
-				log.Printf("%s.Process() stop", l.Name)
+				l.Stop()
 			default:
 				log.Printf("%s.Process() unknown ctrl %d", l.Name, ctrl)
 			}
