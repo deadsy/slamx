@@ -7,6 +7,12 @@ Driver for Neato XV11 LIDAR Unit
 * Read the serial stream from the LIDAR and repackage it as range data
 * Feed the range data as messages to another Go routine
 
+Pins:
+Red – 5v
+Black – Gnd
+Brown – Serial Rx (3.3V)
+Orange - Serial Tx (3.3V)
+
 Baud Rate:
 22 bytes/frame
 90 frames/rev
@@ -16,7 +22,7 @@ Baud Rate:
 So: The serial port runs at 115200 baud to keep up.
 
 Serial Port:
-The LIDAR is powered with +5V but the Rx/Tx lines ares 3.3V.
+The LIDAR is powered with +5V but the Rx/Tx lines are 3.3V.
 That's good because we can plug them directly into the RPi.
 
 Motor Speed:
@@ -42,9 +48,6 @@ Serial  KSH34313AA-0140063
 LastCal [5371726C]
 Runtime V2.6.15295
 """
-
-References:
-https://xv11hacking.wikispaces.com/LIDAR+Sensor
 
 */
 //-----------------------------------------------------------------------------
